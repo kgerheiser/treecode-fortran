@@ -222,6 +222,10 @@ contains
     
   end subroutine set_critical_radius
 
+
+  !*****************************************************************************
+  ! Expand size of tree so that it can fit all bodies
+  !*****************************************************************************
   subroutine expand_tree(tree, body_array)
     class(bhtree), intent(inout) :: tree
     class(body), intent(in) :: body_array(:)
@@ -230,7 +234,7 @@ contains
     integer i, j, nbodies
 
     nbodies = size(body_array)
-    dmax = 0d0
+    dmax = 0.0_prec
 
     do i = 1, nbodies
        do j = 1, ndims
