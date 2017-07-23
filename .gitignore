@@ -3,3 +3,5 @@
 *.mod
 src/bhtree
 *.DS_store
+src/my_project.dep
+*~
