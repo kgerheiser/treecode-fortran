@@ -9,10 +9,13 @@ module bhtree_mod
   private
   public :: bhtree
 
+  integer, parameter :: max_depth = 32
+
   type :: bhtree
      real(prec) :: theta, eps, rsize
-     logical :: use_quad, bh86, sw94
+     logical :: quick_scan, use_quad, bh86, sw94
      integer :: tdepth, ncells
+     integer :: cell_hist(max_depth), subn_hist(max_depth)
      type(cell_list) :: cells
      type(cell), pointer :: root
    contains
@@ -130,33 +133,94 @@ contains
     end select
 
   end subroutine thread_tree
-  
 
-  recursive subroutine eval_center_of_mass(p, psize, level)
+  
+  !*****************************************************************************
+  ! Descend tree to find cells center-of-mass, and sets critical cell radii
+  !*****************************************************************************
+  recursive subroutine eval_center_of_mass(tree, p, psize, level)
+    type(bhtree), intent(inout)    :: tree
     class(cell), intent(inout)  :: p
     real(prec),  intent(in)     :: psize
     integer,     intent(in)     :: level
 
     class(node), pointer :: q
-    integer :: tree_depth, i
+    real(prec) :: cm_pos(ndims), tmpv(ndims)
+    integer :: i, k
 
-    tree_depth = 1
-    ! cell_hist(level)++
+    tree%tdepth = max(tree%tdepth, level)
+    tree%cell_hist(level) = tree%cell_hist(level) + 1
+    
+    p%mass = 0.0_prec
+    cm_pos = 0.0_prec
 
     do i = 1, nsub
        q => p%descendants(i)%ptr
        if (associated(q)) then
-          !sub_history(level)++
-
-          select type(a => q)
+          tree%subn_hist = tree%subn_hist + 1
+          
+          select type(q)
              class is(cell)
-             call eval_center_of_mass(a, psize/2.0_prec, level+1)
+             call eval_center_of_mass(tree, q, psize/2.0_prec, level+1)
           end select
-       end if
 
+          p%update = p%update .or. q%update
+          p%mass = p%mass + q%mass
+          cm_pos = cm_pos + (q%pos * q%mass)
+       end if
     end do
 
+    if (p%mass > 0.0_prec) then
+       cm_pos = cm_pos / p%mass
+    else
+       cm_pos = p%pos
+    end if
+
+    do k = 1, ndims
+       if (cm_pos(k) < p%pos(k) - psize / 2.0_prec .or. &
+            p%pos(k) + psize / 2.0_prec <= cm_pos(k)) then
+          stop "eval_center_of_mass: tree structure error"
+       end if
+    end do
+
+    if (.not. tree%quick_scan) then
+       call set_critical_radius(tree, p, cm_pos, psize)
+    end if
+    
+    p%pos = cm_pos
+    
   end subroutine eval_center_of_mass
+
+  
+  !*****************************************************************************
+  ! Assign critical radius of cell, which determines force evaluation accuracy
+  ! TODO: make this a function?
+  !*****************************************************************************
+  subroutine set_critical_radius(tree, p, cm_pos, psize)
+    type(bhtree), intent(in) :: tree
+    type(cell), intent(inout) :: p
+    real(prec), intent(in) :: cm_pos(ndims), psize
+
+    real(prec) :: bmax2, d
+    integer :: k
+
+    if (tree%theta == 0.0_prec) then
+       p%rcrit2 = (2.0_prec * tree%rsize)**2
+    else if (tree%sw94) then
+       bmax2 = 0.0_prec
+       do k = 1, ndims
+          d = cm_pos(k) - p%pos(k) + psize / 2.0_prec
+          bmax2 = bmax2 + max(d, psize - d)**2
+       end do
+       p%rcrit2 = bmax2 / tree%theta**2
+    else if (tree%bh86) then
+       p%rcrit2 = (psize / tree%theta)**2
+    else
+       d = norm2(p%pos - cm_pos)
+       p%rcrit2 = (psize / tree%theta + d)**2
+    end if
+    
+  end subroutine set_critical_radius
 
   subroutine expand_tree(tree, body_array)
     class(bhtree), intent(inout) :: tree
@@ -178,35 +242,8 @@ contains
     do while(tree%rsize < 2.0_prec * dmax)
        tree%rsize = tree%rsize * 2.0_prec
     end do
-
+    
   end subroutine expand_tree
-
-
-  ! ! Fix tree values
-  ! subroutine set_critical_radius(p, cm_pos, psize)
-  !   type(cell_ptr), intent(inout) :: p
-  !   real(prec), intent(in) :: cm_pos(ndims), psize
-
-  !   real(prec) :: bmax2, d
-  !   integer :: k
-
-  !   if (theta == 0.0_prec) then
-  !      p%ptr%rcrit2 = (2.0_prec * tree%rsize)**2
-  !   else if (tree%sw94) then
-  !      bmax2 = 0.0_prec
-  !      do k = 1, ndims
-  !         d = cm_pos(k) - p%pos(k) + psize / 2.0_prec
-  !         bmax2 = bmax2 + max(d, psize - d)**2
-  !      end do
-  !      p%rcrit2 = bmax2 / tree%theta**2
-  !   else if(tree%bh86) then
-  !      p%rcrit2 = (psize / tree%theta)**2
-  !   else
-  !      d = norm2(cm_pos, p%pos)
-  !      p%rcrit2 = (psize / tree%theta + d)**2
-  !   end if
-
-  ! end subroutine set_critical_radius
 
 
   !perhaps I should have a descendant getter instead of accessing the array directly
