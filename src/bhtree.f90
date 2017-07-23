@@ -17,6 +17,7 @@ module bhtree_mod
      type(cell), pointer :: root
    contains
      procedure :: expand_tree
+     procedure :: get_free_cell
   end type bhtree
 
 contains
@@ -37,15 +38,24 @@ contains
 
   end subroutine make_tree
 
+  function get_free_cell(tree) result(freecell)
+    class(bhtree), intent(inout) :: tree
+    type(cell), pointer :: freecell
+
+    freecell => tree%cells%get_free_cell()
+  end function get_free_cell
+
+  !*****************************************************************************
+  ! Insert body into tree 
+  !*****************************************************************************
   subroutine load_body(tree, b)
     type(bhtree) :: tree
     class(body), target :: b
 
     type(cell), pointer  :: q, c
 
-    !fix this, should probably not be pointer
     integer :: q_index, i, index
-    real(prec) :: qsize, dmax
+    real(prec) :: qsize, dmax, dist2, dist(ndims)
 
 
     q => tree%root
@@ -54,9 +64,13 @@ contains
 
     do while(associated(q%descendants(q_index)%ptr))
        select type(child => q%descendants(q_index)%ptr)
-          class is(body)
-             ! if distance is 0 they are the same
-          c => tree%cells%get_free_cell()
+       class is(body)
+
+          dist = b%pos - child%pos
+          dist2 = dot_product(dist, dist)
+          if (dist2 == 0.0_prec) stop "two bodies have same position"
+
+          c => tree%get_free_cell()
 
           do i = 1, ndims
              if (b%pos(i) < q%pos(i)) then
@@ -70,13 +84,16 @@ contains
           q%descendants(q_index)%ptr => c
 
           q => c
-          class is(cell)
+         
+       class is(cell)
           q => child
        end select
 
        q_index = q%sub_index(b)
        qsize = qsize / 2.0_prec
     end do
+
+    q%descendants(q_index)%ptr => b
 
   end subroutine load_body
 
