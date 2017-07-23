@@ -96,10 +96,13 @@ contains
     q%descendants(q_index)%ptr => b
 
   end subroutine load_body
+  
 
+  !*****************************************************************************
+  ! Recursive walk of tree installing next and more links
+  !*****************************************************************************
   recursive subroutine thread_tree(p, n)
     class(node), pointer, intent(inout) :: p, n
-
 
     integer :: i, ndesc
     type(node_ptr) :: desc(nsub + 1)
@@ -116,51 +119,18 @@ contains
              desc(ndesc)%ptr => p%descendants(i)%ptr
           end if
        end do
-
-
+    
        p%more => desc(1)%ptr
-       ndesc = ndesc + 1
-       desc(ndesc)%ptr =>  n
+       desc(ndesc+1)%ptr =>  n
 
        do i = 1, ndesc
           call thread_tree(desc(i)%ptr, desc(i+1)%ptr)
        end do
+       
     end select
 
   end subroutine thread_tree
-
-
-  ! recursive subroutine thread_tree(p, n)
-  !   class(node_ptr), intent(inout) :: p, n
-
-  !   integer :: i, ndesc
-  !   type(node_ptr) :: descendants(nsub + 1)p
-
-  !   p%ptr%next => n%ptr
-
-  !   select type(a => p%ptr)
-  !   class is(cell)
-  !      ndesc = 0
-  !      do i = 1, nsub
-  !         if (associated(a%descendants(i)%ptr)) then
-  !            ndesc = ndesc + 1
-  !            descendants(ndesc)%ptr => a%descendants(i)%ptr
-  !         end if
-  !      end do
-
-  !      a%more%ptr => descendants(1)%ptr
-  !      ndesc = ndesc + 1
-  !      descendants(ndesc)%ptr => n%ptr
-
-  !      do i = 1, ndesc
-  !         call thread_tree(descendants(i), descendants(i+1))
-  !      end do
-
-  !   end select
-
-  ! end subroutine thread_tree
-
-  !class is or type is
+  
 
   recursive subroutine eval_center_of_mass(p, psize, level)
     class(cell), intent(inout)  :: p
