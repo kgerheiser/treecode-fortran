@@ -2,7 +2,7 @@
 module bhtree_mod
   use constants_mod
   use node_mod, only: node, node_ptr
-  use cell_mod, only: cell, cell_ptr, cell_list
+  use cell_mod, only: cell, cell_ptr
   use body_mod, only: body, body_ptr
   implicit none
 
@@ -13,46 +13,135 @@ module bhtree_mod
 
   type :: bhtree
      real(prec) :: theta, eps, rsize
-     logical :: quick_scan, use_quad, bh86, sw94
-     integer :: tdepth, ncells
+     logical :: quick_scan, use_quad, bh86, sw94, first_call = .true.
+     integer :: tdepth, ncells, num_cells
      integer :: cell_hist(max_depth), subn_hist(max_depth)
-     type(cell_list) :: cells
-     type(cell), pointer :: root
+     class(cell), pointer :: root
+     class(node), pointer :: freecell
    contains
-     procedure :: expand_tree
-     procedure :: get_free_cell
+     procedure :: expand_box
+     procedure :: make_cell
+     procedure :: new_tree
+     procedure :: load_body
+     procedure :: eval_center_of_mass
   end type bhtree
 
 contains
 
-  subroutine init_tree(tree)
+  
+  !*****************************************************************************
+  ! Initialize tree for hierarchical force calculation
+  !*****************************************************************************
+  subroutine make_tree(tree, body_array)
     class(bhtree), intent(inout) :: tree
-    allocate(tree%root)
-    tree%root%next => null()
-  end subroutine init_tree
+    type(body_ptr), intent(inout) :: body_array(:)
+    class(node), pointer :: null_ptr
 
+    integer :: i
 
-  subroutine make_tree(tree, bodies)
-    type(bhtree), intent(inout) :: tree
-    type(body_ptr) :: bodies(:)
-
-
+    call tree%new_tree()
+    
+    tree%root => tree%make_cell()
     tree%root%pos = 0.0_prec
 
+    call tree%expand_box(body_array)
+
+    do i = 1, size(body_array)
+       call tree%load_body(body_array(i)%ptr)
+    end do
+
+    if (tree%bh86 .and. tree%sw94) then
+       stop "incompatible options bh86 and sw94"
+    end if
+
+    tree%tdepth = 0
+    tree%cell_hist = 0
+    tree%subn_hist = 0
+
+    call tree%eval_center_of_mass(tree%root, tree%rsize, 0)
+    null_ptr => null()
+    call thread_tree(tree%root, null_ptr)
+
+    if (tree%use_quad) then
+       call eval_quadrupole_moment(tree%root)
+    end if
+    
   end subroutine make_tree
 
-  function get_free_cell(tree) result(freecell)
+  
+  !*****************************************************************************
+  ! Reclaim cells in tree, and prepare to build a new one
+  !*****************************************************************************
+  subroutine new_tree(tree)
+    class(bhtree), intent(inout) :: tree
+    type(node_ptr) :: p
+
+    if (.not. tree%first_call) then
+       p%ptr => tree%root
+
+       do while(associated(p%ptr))
+          select type(a => p%ptr)
+          class is (cell)
+             p%ptr%next => tree%freecell
+             tree%freecell => p%ptr
+             p%ptr => a%more
+          class is (body)
+             p%ptr => p%ptr%next
+          end select
+       end do
+    else
+       tree%first_call = .false.
+    end if
+
+    tree%root => null()
+    tree%ncells = 0
+    
+  end subroutine new_tree
+
+  
+  !*****************************************************************************
+  ! Return a pointer to a free cell
+  !*****************************************************************************
+  function make_cell(tree) result(freecell)
     class(bhtree), intent(inout) :: tree
     type(cell), pointer :: freecell
 
-    freecell => tree%cells%get_free_cell()
-  end function get_free_cell
+    integer :: i
 
+    if (.not. associated(tree%freecell)) then
+       allocate(tree%freecell, mold = freecell)
+       select type (c => tree%freecell)
+       class is(cell)
+          freecell => c
+       class default
+          stop "make_cell: mismatched type, should be cell 1"
+       end select
+    else
+       select type(c => tree%freecell)
+       class is(cell)
+          freecell => c
+          tree%freecell => freecell%next
+       class default
+          stop "make_cell: mismatched type, should be cell 2"
+       end select
+    end if
+
+    freecell%update = .false.
+    
+    do i = 1, nsub
+       freecell%descendants(i)%ptr => null()
+    end do
+    
+    tree%num_cells = tree%num_cells + 1
+    
+  end function make_cell
+
+  
   !*****************************************************************************
   ! Insert body into tree 
   !*****************************************************************************
   subroutine load_body(tree, b)
-    type(bhtree) :: tree
+    class(bhtree) :: tree
     class(body), target :: b
 
     type(cell), pointer  :: q, c
@@ -73,7 +162,7 @@ contains
           dist2 = dot_product(dist, dist)
           if (dist2 == 0.0_prec) stop "two bodies have same position"
 
-          c => tree%get_free_cell()
+          c => tree%make_cell()
 
           do i = 1, ndims
              if (b%pos(i) < q%pos(i)) then
@@ -105,7 +194,8 @@ contains
   ! Recursive walk of tree installing next and more links
   !*****************************************************************************
   recursive subroutine thread_tree(p, n)
-    class(node), pointer, intent(inout) :: p, n
+    class(node), intent(inout) :: p
+    class(node), target, intent(inout) ::  n
 
     integer :: i, ndesc
     type(node_ptr) :: desc(nsub + 1)
@@ -114,8 +204,9 @@ contains
 
     select type(p)
     type is(cell)
+       
        ndesc = 0
-
+       
        do i = 1, nsub
           if (associated(p%descendants(i)%ptr)) then
              ndesc = ndesc + 1
@@ -131,7 +222,7 @@ contains
        end do
        
     end select
-
+    
   end subroutine thread_tree
 
   
@@ -139,7 +230,7 @@ contains
   ! Descend tree to find cells center-of-mass, and sets critical cell radii
   !*****************************************************************************
   recursive subroutine eval_center_of_mass(tree, p, psize, level)
-    type(bhtree), intent(inout)    :: tree
+    class(bhtree), intent(inout)    :: tree
     class(cell), intent(inout)  :: p
     real(prec),  intent(in)     :: psize
     integer,     intent(in)     :: level
@@ -226,9 +317,9 @@ contains
   !*****************************************************************************
   ! Expand size of tree so that it can fit all bodies
   !*****************************************************************************
-  subroutine expand_tree(tree, body_array)
+  subroutine expand_box(tree, body_array)
     class(bhtree), intent(inout) :: tree
-    class(body), intent(in) :: body_array(:)
+    type(body_ptr), intent(in) :: body_array(:)
 
     real(prec) :: dmax, d
     integer i, j, nbodies
@@ -238,7 +329,7 @@ contains
 
     do i = 1, nbodies
        do j = 1, ndims
-          d = abs(body_array(i)%pos(j) - tree%root%pos(j))
+          d = abs(body_array(i)%ptr%pos(j) - tree%root%pos(j))
           if (d > dmax) dmax = d
        end do
     end do
@@ -247,7 +338,7 @@ contains
        tree%rsize = tree%rsize * 2.0_prec
     end do
     
-  end subroutine expand_tree
+  end subroutine expand_box
 
 
   !perhaps I should have a descendant getter instead of accessing the array directly
@@ -333,15 +424,6 @@ contains
        I(k,k) = 1.0_prec
     end do
   end function identity
-
-
-  subroutine new_tree(tree)
-    type(bhtree), intent(inout) :: tree
-    logical, save :: first_call = .true.
-
-    call tree%cells%reset()
-  end subroutine new_tree
-
 
 end module bhtree_mod
 
