@@ -1,7 +1,7 @@
 FC = ifort #gfortran-mp-7
-#FCFLAGS :=  -implicitnone
+FCFLAGS :=  -implicitnone
 #FASTFLAGS := -fast -static-intel
-#DEBUGFLAGS := -check all -traceback -g -fstack-protector
+DEBUGFLAGS := -check all -traceback -g -fstack-protector -warn all
 
 # Script to generate the dependencies
 MAKEDEPEND=./fort_depend.py

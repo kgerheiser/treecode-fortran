@@ -15,52 +15,24 @@ module node_mod
 
   type :: node_ptr
      class(node), pointer :: ptr => null()
-   contains
-     procedure :: is_null
   end type node_ptr
-
-  type :: node_list
-     class(node), pointer :: head => null()
-     class(node), pointer :: current => null()
-     integer :: ncells
-   contains
-     procedure :: initialize
-     procedure :: reset
-     procedure :: get_free_cell
-  end type node_list
   
 contains
 
-  pure logical function is_null(nodeptr)
-    class(node_ptr), intent(in) :: nodeptr
-    is_null = .not. associated(nodeptr%ptr)
-  end function is_null
+  pure function distance_to_squared(self, node_) result(dist2)
+    class(node), intent(in) :: self, node_
+    real(prec) :: dist2(ndims), diff(ndims)
 
-  subroutine initialize(list, kind)
-    class(node_list), intent(inout) :: list
-    class(node), intent(in) :: kind
-    allocate(list%head, mold = kind)
-    list%current => list%head
-    list%ncells = 0
-  end subroutine initialize
+    diff = node_%pos - self%pos
+    dist2 = dot_product(diff, diff)
+  end function distance_to_squared
 
-  subroutine reset(list)
-    class(node_list), intent(inout) :: list
-    list%current => list%head
-    list%ncells = 0
-  end subroutine reset
-  
-  function get_free_cell(list) result(freecell)
-    class(node_list), intent(inout) :: list
-    class(node), pointer :: freecell
- 
-    if (associated(list%current)) then
-       freecell => list%current
-    else
-       allocate(list%current%next, mold = list%head)
-    end if
-    
-    list%current => list%current%next
-  end function get_free_cell
+  pure function distance_to(self, node_) result(dist)
+    class(node), intent(in) :: self, node_
+    real(prec) :: dist(ndims), diff(ndims)
+
+    diff = node_%pos - self%pos
+    dist = norm2(diff)
+  end function distance_to
 
 end module node_mod

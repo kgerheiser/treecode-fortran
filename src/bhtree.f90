@@ -12,7 +12,7 @@ module bhtree_mod
   integer, parameter :: max_depth = 32
 
   type :: bhtree
-     real(prec) :: theta, eps, rsize
+     real(prec) :: theta, eps, eps2, rsize
      logical :: quick_scan, use_quad, bh86, sw94, first_call = .true.
      integer :: tdepth, ncells, num_cells
      integer :: cell_hist(max_depth), subn_hist(max_depth)
@@ -352,7 +352,7 @@ contains
 
     integer :: ndesc, i, ix
     class(node), pointer :: q
-    type(node_ptr) :: desc(nsub)!, q
+    type(node_ptr) :: desc(nsub)
     real(prec) :: dr(ndims), drsq
     real(prec), dimension(ndims, ndims) :: drdr, I_drsq, tmpm
 
@@ -423,7 +423,197 @@ contains
     do k = 1, ndims
        I(k,k) = 1.0_prec
     end do
+    
   end function identity
+
+  recursive subroutine walk_tree(active, aptr, nptr, interact, cptr, bptr, p, psize, pmid)
+    type(node_ptr), intent(inout) :: active(:)
+    type(cell_ptr), intent(inout) :: interact(:)
+    integer, value :: aptr, nptr, cptr, bptr
+    class(node), pointer, intent(inout) :: p
+    real(prec), intent(in) :: psize, pmid(ndims)
+
+    integer :: i, n, k, actsafe, actlen, np
+    type(cell), pointer :: c
+    class(node), pointer :: q
+    
+    if (p%update) then
+       np = nptr
+       actsafe = actlen - nsub
+
+       do i = aptr, nptr
+          select type(ap => active(i)%ptr)
+          type is(cell)
+             if (accept(ap, psize, pmid)) then
+                c => interact(cptr)%ptr
+                c%mass = ap%mass
+                c%pos = ap%pos
+                c%quad_moment = ap%quad_moment
+                cptr = cptr + 1
+             else
+                q => ap%more
+                do while(.not. associated(q, ap%next))
+                   active(np)%ptr => q
+                   np = np + 1
+                   q => q%next
+                end do
+             end if
+          type is(body)
+             if (.not. associated(p, ap)) then
+                bptr = bptr - 1
+                interact(bptr)%ptr%mass = ap%mass
+                interact(bptr)%ptr%pos = ap%pos
+             end if
+          end select
+       end do
+
+       !actmax = max(actmax, np - active)
+       if (np /= nptr) then
+          call walk_sub(active, nptr, np, interact, cptr, bptr, p, psize, pmid)
+       else
+       end if
+    end if
+    
+  end subroutine walk_tree
+  
+  subroutine walk_sub(active, nptr, np, interact, cptr, bptr, p, psize, pmid)
+    type(node_ptr), intent(inout) :: active(:)
+    type(cell_ptr), intent(inout) :: interact(:)
+    integer, intent(inout) :: nptr, np, cptr, bptr
+    class(node), pointer, intent(inout) :: p
+    real(prec), intent(in) :: psize, pmid(ndims)
+
+    real(prec) :: poff, nmid(ndims)
+    class(node), pointer :: q
+
+    poff = psize / 4.0_prec
+
+    select type(a => p)
+    type is(cell)
+       q => a%more
+       do while(.not. associated(q, q%next))
+          nmid = pmid + merge(-poff, poff, q%pos < pmid)
+          call walk_tree(active, nptr, np, interact, cptr, bptr, q, psize / 2.0_prec, nmid)
+          q => q%next
+       end do
+    type is(body)
+       nmid = pmid + merge(-poff, poff, q%pos < pmid)
+       call walk_tree(active, nptr, np, interact, cptr, bptr, p, psize / 2.0_prec, nmid)
+    end select
+
+  end subroutine walk_sub
+
+  subroutine sum_gravity(tree, p0, interact, cptr, bptr)
+    class(bhtree), intent(in) :: tree
+    class(body), intent(inout) :: p0
+    type(cell_ptr), intent(inout) :: interact(:)
+    integer, intent(in) :: cptr, bptr
+
+    real(prec) :: pos0(ndims), acc0(ndims), phi0
+
+    pos0 = p0%pos
+    phi0 = 0.0_prec
+    acc0 = 0.0_prec
+
+    if (tree%use_quad) then
+       call sum_cell(tree, interact, p0, phi0, acc0)
+    end if
+
+    !call sum_node()
+    
+    
+  end subroutine sum_gravity
+
+  subroutine sum_node(tree, interactions, body0, phi0, acc0)
+    class(bhtree), intent(in) :: tree
+    class(body), intent(in) :: body0
+    type(cell_ptr), intent(in) :: interactions(:)
+    real(prec), intent(inout) :: phi0, acc0(ndims)
+
+    real(prec) :: dr(ndims), qdr(ndims)
+    real(prec) :: dr2, drab, phi_p, mr3i
+    type(cell), pointer :: p
+
+    integer :: i
+
+    do i = 1, size(interactions)
+       p => interactions(i)%ptr
+       dr = p%pos - body0%pos
+       dr2 = dot_product(dr, dr) + tree%eps2
+       drab = sqrt(dr2)
+
+       phi_p = p%mass / drab
+       phi0 = phi0 - phi_p
+       mr3i = phi_p / dr2
+       acc0 = acc0 + (dr * mr3i)
+    end do
+    
+  end subroutine sum_node
+  
+
+  subroutine sum_cell(tree, interactions, body0 , phi0, acc0)
+    class(bhtree), intent(in) :: tree
+    class(body), intent(in) :: body0
+    type(cell_ptr), intent(in) :: interactions(:)
+    real(prec), intent(inout) :: phi0, acc0(ndims)
+
+    real(prec) :: dr(ndims), qdr(ndims)
+    real(prec) :: dr2, drab, phi_p, mr3i, drqdr, dr5i, phi_q
+    type(cell), pointer :: p
+
+    integer :: i
+
+    do i = 1, size(interactions)
+       p => interactions(i)%ptr
+       dr = p%pos - body0%pos
+       dr2 = dot_product(dr, dr) + tree%eps2
+       drab = sqrt(dr2)
+
+       phi_p = p%mass / drab
+       mr3i = phi_p / dr2
+
+       qdr = matmul(p%quad_moment, dr)
+       drqdr = dot_product(qdr, qdr)
+       dr5i = 1.0_prec / (dr2**2 * drab)
+       phi_q = 0.5_prec * dr5i * drqdr
+       phi0 = phi0 - (phi_p + phi_q)
+       mr3i = 5.0_prec * phi_q / dr2
+       acc0 = acc0 + (dr * mr3i) + (qdr * -dr5i)
+    end do
+    
+  end subroutine sum_cell
+
+
+  pure logical function accept(this, psize, pmid)
+    class(cell), intent(in) :: this
+    real(prec), intent(in) :: psize, pmid(ndims)
+
+    real(prec) :: dmax, dsq, dk
+    integer :: k
+
+    dmax = psize
+    dsq = 0.0_prec
+
+    do k = 1, ndims
+       dk = this%pos(k) - pmid(k)
+
+       if (dk < 0.0_prec) then
+          dk = -dk
+       end if
+
+       if (dk > dmax) then
+          dmax = dk
+       end if
+       
+       dk = dk - (0.5_prec * psize)
+
+       if (dk > 0.0_prec) then
+          dsq = dsq + dk**2
+       end if
+    end do
+
+    accept = (dsq > this%rcrit2) .and. (dmax > (1.5_prec * psize))
+  end function accept
 
 end module bhtree_mod
 
