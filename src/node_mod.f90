@@ -5,11 +5,10 @@ module node_mod
   integer, parameter :: body_type = 0
   integer, parameter :: cell_type = 1
 
-  type :: node
-     logical :: update
-     real(prec) :: mass, pos(ndims)
+  type, abstract :: node
+     logical :: update = .true.
+     real(prec) :: mass = 0.0_prec, pos(ndims) = 0.0_prec
      class(node), pointer :: next => null()
-     integer :: type
    contains
   end type node
 
