@@ -1,0 +1,33 @@
+  @test
+  subroutine test_read_formatted_file()
+    use pfunit_mod
+    use bhtree_io_mod
+    implicit none
+    
+    @assertEqual("Hello World!","Hello World!")
+  end subroutine test_read_formatted_file
+
+ @test
+ subroutine test_write_formatted_file()
+   use pfunit_mod
+   use bhtree_io_mod
+   use body_mod
+   implicit none
+
+   type(body_ptr), allocatable :: body_array(:)
+   integer i, n
+
+   n = 3
+   allocate(body_array(n))
+
+   do i = 1, n
+      allocate(body_array(i)%ptr)
+      body_array(i)%ptr%mass = real(i)
+      body_array(i)%ptr%pos = real(i+1)
+      body_array(i)%ptr%vel = real(i+2)
+   end do
+
+   call write_bodies_to_formatted_file("formatted_file.txt", body_array)
+ 
+   @assertEqual("Hello World!","Hello World!")
+ end subroutine test_write_formatted_file

@@ -1,0 +1,4 @@
+ADD_TEST_SUITE(nodeTest_suite)
+ADD_TEST_SUITE(cellTest_suite)
+ADD_TEST_SUITE(bhtreeTest_suite)
+ADD_TEST_SUITE(bhtreeIOTest_suite)

@@ -1,0 +1,291 @@
+module bhtreeTest
+  use pfunit_mod
+  use bhtree_mod
+  use body_mod
+  use node_mod
+  use cell_mod
+  use bhtree_io_mod
+  use constants_mod
+
+  implicit none
+
+contains
+  
+  @test
+  subroutine test_new_tree()
+    type(bhtree) :: tree
+
+    @assertTrue(tree%first_call)
+    call tree%new_tree()
+    @assertFalse(tree%first_call)
+    @assertNotAssociated(tree%root)
+
+  end subroutine test_new_tree
+
+  @test
+  subroutine test_make_cell()
+    type(bhtree) :: tree
+    type(cell), pointer :: freecell
+
+    call tree%new_tree()
+    freecell => tree%make_cell()
+    @assertAssociated(freecell)
+    @assertEqual(1, tree%num_cells)
+
+  end subroutine test_make_cell
+
+  @test
+  subroutine test_expand_box()
+    type(body_ptr), allocatable :: body_array(:)
+    integer :: n
+    type(bhtree) :: tree
+
+    body_array = read_bodies_from_formatted_file("test_files/8_body_root_cell.txt")
+    n = size(body_array)
+
+    call tree%new_tree()
+
+    tree%root => tree%make_cell()
+    tree%root%pos = 0.0_prec
+
+    call tree%expand_box(body_array)
+    @assertEqual(1.0, tree%rsize)
+
+  end subroutine test_expand_box
+
+  @test
+  subroutine test_read_bodies_from_formatted_file()
+    type(body_ptr), allocatable :: body_array(:)
+    integer :: n
+
+    body_array = read_bodies_from_formatted_file("test_files/8_body_root_cell.txt")
+    n = size(body_array)
+    @assertEqual(8, n)
+
+    @assertEqual(body_array(1)%ptr%mass, 1.0)
+    @assertEqual(body_array(1)%ptr%pos(1), 0.5)
+    @assertEqual(body_array(1)%ptr%vel(1), 0.0)
+
+  end subroutine test_read_bodies_from_formatted_file
+
+
+  @test
+  subroutine test_load_body()
+    type(body_ptr), allocatable :: body_array(:)
+    integer :: i, n
+    type(bhtree) :: tree
+
+    body_array = read_bodies_from_formatted_file("test_files/8_body_root_cell.txt")
+    n = size(body_array)
+
+    call tree%new_tree()
+
+    tree%root => tree%make_cell()
+    tree%root%pos = 0.0_prec
+
+    call tree%expand_box(body_array)
+
+    do i = 1, n
+       call tree%load_body(body_array(i)%ptr)
+    end do
+
+  end subroutine test_load_body
+
+  @test
+  subroutine test_eval_center_of_mass()
+    type(body_ptr), allocatable :: body_array(:)
+    integer :: i, n
+    type(bhtree) :: tree
+
+    body_array = read_bodies_from_formatted_file("test_files/8_body_root_cell.txt")
+    n = size(body_array)
+
+    call tree%new_tree()
+
+    tree%root => tree%make_cell()
+    tree%root%pos = 0.0_prec
+
+    call tree%expand_box(body_array)
+
+    do i = 1, n
+       call tree%load_body(body_array(i)%ptr)
+    end do
+
+    call tree%eval_center_of_mass(tree%root, tree%rsize, 1)
+
+    do i = 1, ndims
+       @assertEqual(tree%root%pos(i), 0.0)
+    end do
+
+  end subroutine test_eval_center_of_mass
+
+
+  @test
+  subroutine test_thread_tree()
+    type(body_ptr), allocatable :: body_array(:)
+    integer :: i, n, num_bodies, num_cells
+    type(bhtree) :: tree
+    class(node), pointer :: null_ptr
+    type(node_ptr) :: p
+
+    body_array = read_bodies_from_formatted_file("test_files/8_body_root_cell.txt")
+    n = size(body_array)
+
+    call tree%new_tree()
+
+    tree%root => tree%make_cell()
+    tree%root%pos = 0.0_prec
+
+    call tree%expand_box(body_array)
+
+    do i = 1, n
+       call tree%load_body(body_array(i)%ptr)
+    end do
+
+    call tree%eval_center_of_mass(tree%root, tree%rsize, 1)
+
+    null_ptr => null()
+    call thread_tree(tree%root, null_ptr)
+    
+    p%ptr => tree%root
+    num_bodies = 0
+    num_cells = 0
+
+    @assertNotAssociated(tree%root%next)
+    @assertNotAssociated(tree%root%descendants(8)%ptr%next)
+
+    do i = 1, 7
+       @assertAssociated(tree%root%descendants(i)%ptr%next, tree%root%descendants(i+1)%ptr)
+    end do
+    
+    do while(associated(p%ptr))
+       select type(a => p%ptr)
+       class is (cell)
+          p%ptr => a%more
+          @assertAssociated(p%ptr, a%descendants(1)%ptr)
+          num_cells = num_cells + 1
+       class is (body)
+          num_bodies = num_bodies + 1
+          p%ptr => p%ptr%next
+       end select
+    end do
+
+    @assertEqual(tree%num_cells, num_cells)
+    @assertEqual(n, num_bodies)
+
+  end subroutine test_thread_tree
+
+
+  @test
+  subroutine test_eval_quadrupole_moment()
+    type(body_ptr), allocatable :: body_array(:)
+    integer :: i, n, num_bodies, num_cells
+    type(bhtree) :: tree
+    class(node), pointer :: null_ptr
+    type(node_ptr) :: p
+    
+     body_array = read_bodies_from_formatted_file("test_files/8_body_root_cell.txt")
+    n = size(body_array)
+
+    call tree%new_tree()
+
+    tree%root => tree%make_cell()
+    tree%root%pos = 0.0_prec
+
+    call tree%expand_box(body_array)
+
+    do i = 1, n
+       call tree%load_body(body_array(i)%ptr)
+    end do
+
+    tree%use_quad = .true.
+    tree%bh86 = .true.
+    
+    tree%tdepth = 0
+    tree%cell_hist = 0
+    tree%subn_hist = 0
+
+    call tree%eval_center_of_mass(tree%root, tree%rsize, 1)
+    
+    null_ptr => null()
+    call thread_tree(tree%root, null_ptr)
+    
+    p%ptr => tree%root
+    num_bodies = 0
+    num_cells = 0
+
+    if (tree%use_quad) then
+       call eval_quadrupole_moment(tree%root)
+    end if
+    
+  end subroutine test_eval_quadrupole_moment
+
+  @test
+  subroutine test_set_critical_radius()
+   
+  end subroutine test_set_critical_radius
+
+  @test
+  subroutine test_gravcalc()
+    use constants_mod
+    type(body_ptr), allocatable :: body_array(:), body_array2(:)
+    !integer :: i, n, num_bodies, num_cells
+    integer :: i, j, n
+    type(bhtree) :: tree
+
+    body_array = read_bodies_from_formatted_file("test_files/8_body_root_cell.txt")
+    body_array2 = read_bodies_from_formatted_file("test_files/8_body_root_cell.txt")
+    n = size(body_array)
+
+    tree%use_quad = .true.
+    tree%bh86 = .true.
+    
+    call make_tree(tree, body_array)
+    call gravcalc(tree)
+
+    call array_force(body_array2)
+
+    do i = 1, n
+       do j = 1, ndims
+          @assertEqual(body_array(i)%ptr%acc(j), body_array2(i)%ptr%acc(j))
+       end do
+    end do
+
+  end subroutine test_gravcalc
+
+  function force(b1, b2) result(acc)
+    use iso_fortran_env
+    type(body), intent(in) :: b1, b2
+    real(real64) :: acc(3), dr(3), r2, r
+
+    dr = b2%pos - b1%pos
+    r2 = dot_product(dr, dr)
+    r = sqrt(r2)
+    
+    acc = (b2%mass / r2) * (dr / r)
+  end function force
+
+  subroutine array_force(body_array)
+    use constants_mod
+    type(body_ptr), intent(inout) :: body_array(:)
+    type(body) :: b1, b2
+    integer i, j, n
+    real(prec) :: acc(3)
+
+    n = size(body_array)
+    
+    do i = 1, n
+       b1 = body_array(i)%ptr
+       do j = 1, n          
+          if (i /= j) then
+             b2 = body_array(j)%ptr
+             acc = force(b1, b2)
+             b1%acc = b1%acc +  acc
+          end if
+       end do
+       body_array(i)%ptr%acc = b1%acc
+    end do
+    
+  end subroutine array_force
+  
+end module bhtreeTest
