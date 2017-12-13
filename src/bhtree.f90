@@ -3,20 +3,20 @@ module bhtree_mod
   use constants_mod
   use node_mod, only: node, node_ptr
   use cell_mod, only: cell, cell_ptr
-  use body_mod, only: body, body_ptr
+  use body_mod, only: body, body_ptr, is_same_body
   implicit none
 
   private
-  public :: bhtree
+  public :: bhtree, thread_tree, eval_quadrupole_moment, gravcalc, make_tree
 
   integer, parameter :: max_depth = 32
 
   type :: bhtree
      real(prec) :: theta, eps, eps2, rsize
-     logical :: quick_scan, use_quad, bh86, sw94, first_call = .true.
-     integer :: tdepth, ncells, num_cells
+     logical :: quick_scan = .false., use_quad, bh86, sw94, first_call = .true.
+     integer :: tdepth, num_cells = 0, nbbcalc, nbccalc, actmax, nbodies, actlen
      integer :: cell_hist(max_depth), subn_hist(max_depth)
-     class(cell), pointer :: root
+     type(cell), pointer :: root => null()
      class(node), pointer :: freecell
    contains
      procedure :: expand_box
@@ -28,6 +28,46 @@ module bhtree_mod
 
 contains
 
+  
+  !*****************************************************************************
+  ! Initialize tree for hierarchical force calculation
+  !*****************************************************************************
+  subroutine gravcalc(tree)
+    class(bhtree), intent(inout) :: tree
+    real(real64) :: cpustart, cpuend, cputime
+    real(prec) :: rmid(ndims)
+
+    type(node_ptr), allocatable :: active(:)
+    type(cell_ptr), allocatable :: interact(:)
+    integer :: i
+
+    tree%actlen = 216 * tree%tdepth
+
+    allocate(active(tree%actlen))
+    allocate(interact(tree%actlen))
+
+    do i = 1, tree%actlen
+       !allocate(active(i)%ptr)
+       allocate(interact(i)%ptr)
+    end do
+    
+
+    call cpu_time(cpustart)
+    tree%actmax = 0
+    tree%nbbcalc = 0
+    tree%nbccalc = 0
+
+    active(1)%ptr => tree%root
+    rmid = 0.0_prec   
+    call walk_tree(tree, active, 1, 2, interact, 1, tree%actlen, tree%root, tree%rsize, rmid)
+    call cpu_time(cpuend)
+    
+    cputime = cpuend - cpustart
+    deallocate(active)
+    deallocate(interact)
+    
+  end subroutine gravcalc
+  
   
   !*****************************************************************************
   ! Initialize tree for hierarchical force calculation
@@ -58,7 +98,7 @@ contains
     tree%cell_hist = 0
     tree%subn_hist = 0
 
-    call tree%eval_center_of_mass(tree%root, tree%rsize, 0)
+    call tree%eval_center_of_mass(tree%root, tree%rsize, 1)
     null_ptr => null()
     call thread_tree(tree%root, null_ptr)
 
@@ -94,7 +134,7 @@ contains
     end if
 
     tree%root => null()
-    tree%ncells = 0
+    tree%num_cells = 0
     
   end subroutine new_tree
 
@@ -146,8 +186,8 @@ contains
 
     type(cell), pointer  :: q, c
 
-    integer :: q_index, i, index
-    real(prec) :: qsize, dmax, dist2, dist(ndims)
+    integer :: q_index, i
+    real(prec) :: qsize, dist2, dist(ndims)
 
 
     q => tree%root
@@ -195,7 +235,7 @@ contains
   !*****************************************************************************
   recursive subroutine thread_tree(p, n)
     class(node), intent(inout) :: p
-    class(node), target, intent(inout) ::  n
+    class(node), pointer, intent(inout) ::  n
 
     integer :: i, ndesc
     type(node_ptr) :: desc(nsub + 1)
@@ -213,9 +253,9 @@ contains
              desc(ndesc)%ptr => p%descendants(i)%ptr
           end if
        end do
-    
+       
        p%more => desc(1)%ptr
-       desc(ndesc+1)%ptr =>  n
+       desc(ndesc+1)%ptr => n
 
        do i = 1, ndesc
           call thread_tree(desc(i)%ptr, desc(i+1)%ptr)
@@ -236,7 +276,7 @@ contains
     integer,     intent(in)     :: level
 
     class(node), pointer :: q
-    real(prec) :: cm_pos(ndims), tmpv(ndims)
+    real(prec) :: cm_pos(ndims)
     integer :: i, k
 
     tree%tdepth = max(tree%tdepth, level)
@@ -321,11 +361,12 @@ contains
     class(bhtree), intent(inout) :: tree
     type(body_ptr), intent(in) :: body_array(:)
 
-    real(prec) :: dmax, d
+    real(prec) :: dmax, d, rsize
     integer i, j, nbodies
 
     nbodies = size(body_array)
     dmax = 0.0_prec
+    rsize = 1.0_prec
 
     do i = 1, nbodies
        do j = 1, ndims
@@ -334,9 +375,11 @@ contains
        end do
     end do
 
-    do while(tree%rsize < 2.0_prec * dmax)
-       tree%rsize = tree%rsize * 2.0_prec
+    do while(rsize < 2.0_prec * dmax)
+       rsize = rsize * 2.0_prec
     end do
+
+    tree%rsize = rsize
     
   end subroutine expand_box
 
@@ -350,7 +393,7 @@ contains
   recursive subroutine eval_quadrupole_moment(p)
     type(cell), intent(inout) :: p
 
-    integer :: ndesc, i, ix
+    integer :: ndesc, i
     class(node), pointer :: q
     type(node_ptr) :: desc(nsub)
     real(prec) :: dr(ndims), drsq
@@ -408,6 +451,7 @@ contains
           res(j,i) = v(i) * u(j)
        end do
     end do
+    
   end function outer_product
 
   
@@ -426,22 +470,26 @@ contains
     
   end function identity
 
-  recursive subroutine walk_tree(active, aptr, nptr, interact, cptr, bptr, p, psize, pmid)
+
+  !*****************************************************************************
+  ! Creates an identity matrix
+  !*****************************************************************************
+  recursive subroutine walk_tree(tree, active, aptr, nptr, interact, cptr, bptr, p, psize, pmid)
+    class(bhtree), intent(in) :: tree
     type(node_ptr), intent(inout) :: active(:)
     type(cell_ptr), intent(inout) :: interact(:)
     integer, value :: aptr, nptr, cptr, bptr
-    class(node), pointer, intent(inout) :: p
+    class(node), intent(inout) :: p
     real(prec), intent(in) :: psize, pmid(ndims)
 
-    integer :: i, n, k, actsafe, actlen, np
+    integer :: i, actsafe, np
     type(cell), pointer :: c
     class(node), pointer :: q
-    
+
     if (p%update) then
        np = nptr
-       actsafe = actlen - nsub
-
-       do i = aptr, nptr
+       actsafe = tree%actlen - nsub
+       do i = aptr, nptr - 1
           select type(ap => active(i)%ptr)
           type is(cell)
              if (accept(ap, psize, pmid)) then
@@ -452,35 +500,58 @@ contains
                 cptr = cptr + 1
              else
                 q => ap%more
-                do while(.not. associated(q, ap%next))
+                do while(should_loop(q, ap%next))
                    active(np)%ptr => q
                    np = np + 1
                    q => q%next
                 end do
              end if
           type is(body)
-             if (.not. associated(p, ap)) then
-                bptr = bptr - 1
-                interact(bptr)%ptr%mass = ap%mass
-                interact(bptr)%ptr%pos = ap%pos
-             end if
+             if (.not. is_same_body(ap, p)) then
+             bptr = bptr - 1
+             interact(bptr)%ptr%mass = ap%mass
+             interact(bptr)%ptr%pos = ap%pos
+          end if          
           end select
        end do
 
        !actmax = max(actmax, np - active)
        if (np /= nptr) then
-          call walk_sub(active, nptr, np, interact, cptr, bptr, p, psize, pmid)
+          call walk_sub(tree, active, nptr, np, interact, cptr, bptr, p, psize, pmid)
        else
+          select type(p)
+          type is(body)
+             call sum_gravity(tree, p, interact, cptr, bptr)
+          class default
+             stop
+          end select
        end if
     end if
     
   end subroutine walk_tree
-  
-  subroutine walk_sub(active, nptr, np, interact, cptr, bptr, p, psize, pmid)
+
+  logical function should_loop(q, ap) result(loop)
+    class(node), pointer :: q, ap
+
+    if (.not. associated(q) .and. .not. associated(ap)) then
+       loop = .false.
+    else if (associated(q, ap)) then
+       loop = .false.
+    else if (.not. associated(q, ap)) then
+       loop = .true.
+    end if
+
+  end function should_loop
+
+  !*****************************************************************************
+  ! Creates an identity matrix
+  !*****************************************************************************
+  subroutine walk_sub(tree, active, nptr, np, interact, cptr, bptr, p, psize, pmid)
+    class(bhtree), intent(in) :: tree
     type(node_ptr), intent(inout) :: active(:)
     type(cell_ptr), intent(inout) :: interact(:)
     integer, intent(inout) :: nptr, np, cptr, bptr
-    class(node), pointer, intent(inout) :: p
+    class(node), intent(inout) :: p
     real(prec), intent(in) :: psize, pmid(ndims)
 
     real(prec) :: poff, nmid(ndims)
@@ -491,18 +562,23 @@ contains
     select type(a => p)
     type is(cell)
        q => a%more
-       do while(.not. associated(q, q%next))
+       do while(should_loop(q, q%next))
           nmid = pmid + merge(-poff, poff, q%pos < pmid)
-          call walk_tree(active, nptr, np, interact, cptr, bptr, q, psize / 2.0_prec, nmid)
+          call walk_tree(tree, active, nptr, np, interact, cptr, bptr, q, psize / 2.0_prec, nmid)
           q => q%next
+          if (.not. associated(q)) exit
        end do
     type is(body)
        nmid = pmid + merge(-poff, poff, q%pos < pmid)
-       call walk_tree(active, nptr, np, interact, cptr, bptr, p, psize / 2.0_prec, nmid)
+       call walk_tree(tree, active, nptr, np, interact, cptr, bptr, p, psize / 2.0_prec, nmid)
     end select
 
   end subroutine walk_sub
 
+
+  !*****************************************************************************
+  ! Creates an identity matrix
+  !*****************************************************************************
   subroutine sum_gravity(tree, p0, interact, cptr, bptr)
     class(bhtree), intent(in) :: tree
     class(body), intent(inout) :: p0
@@ -516,28 +592,40 @@ contains
     acc0 = 0.0_prec
 
     if (tree%use_quad) then
-       call sum_cell(tree, interact, p0, phi0, acc0)
+       call sum_cell(tree, interact(:cptr), p0, phi0, acc0)
+    else
+       call sum_node(tree, interact(:cptr), p0, phi0, acc0)
     end if
 
-    !call sum_node()
-    
-    
+    call sum_node(tree, interact(bptr:), p0, phi0, acc0)
+
+    p0%phi = phi0
+    p0%acc = acc0
+
+    ! tree%nbbcalc = tree%nbbcalc + size(interact(btpr:))
+    ! tree%nbccalc = tree%nbccalc + size(interact(:cptr))
+
+
   end subroutine sum_gravity
 
-  subroutine sum_node(tree, interactions, body0, phi0, acc0)
+
+  !*****************************************************************************
+  ! Creates an identity matrix
+  !*****************************************************************************
+  subroutine sum_node(tree, interact, body0, phi0, acc0)
     class(bhtree), intent(in) :: tree
     class(body), intent(in) :: body0
-    type(cell_ptr), intent(in) :: interactions(:)
+    type(cell_ptr), intent(in) :: interact(:)
     real(prec), intent(inout) :: phi0, acc0(ndims)
 
-    real(prec) :: dr(ndims), qdr(ndims)
+    real(prec) :: dr(ndims)
     real(prec) :: dr2, drab, phi_p, mr3i
     type(cell), pointer :: p
 
     integer :: i
 
-    do i = 1, size(interactions)
-       p => interactions(i)%ptr
+    do i = 1, size(interact)
+       p => interact(i)%ptr
        dr = p%pos - body0%pos
        dr2 = dot_product(dr, dr) + tree%eps2
        drab = sqrt(dr2)
@@ -547,14 +635,17 @@ contains
        mr3i = phi_p / dr2
        acc0 = acc0 + (dr * mr3i)
     end do
-    
-  end subroutine sum_node
-  
 
-  subroutine sum_cell(tree, interactions, body0 , phi0, acc0)
+  end subroutine sum_node
+
+
+  !*****************************************************************************
+  ! Creates an identity matrix
+  !*****************************************************************************
+  subroutine sum_cell(tree, interact, body0 , phi0, acc0)
     class(bhtree), intent(in) :: tree
     class(body), intent(in) :: body0
-    type(cell_ptr), intent(in) :: interactions(:)
+    type(cell_ptr), intent(in) :: interact(:)
     real(prec), intent(inout) :: phi0, acc0(ndims)
 
     real(prec) :: dr(ndims), qdr(ndims)
@@ -563,8 +654,8 @@ contains
 
     integer :: i
 
-    do i = 1, size(interactions)
-       p => interactions(i)%ptr
+    do i = 1, size(interact)
+       p => interact(i)%ptr
        dr = p%pos - body0%pos
        dr2 = dot_product(dr, dr) + tree%eps2
        drab = sqrt(dr2)
@@ -580,10 +671,13 @@ contains
        mr3i = 5.0_prec * phi_q / dr2
        acc0 = acc0 + (dr * mr3i) + (qdr * -dr5i)
     end do
-    
+
   end subroutine sum_cell
 
 
+  !*****************************************************************************
+  ! Creates an identity matrix
+  !*****************************************************************************
   pure logical function accept(this, psize, pmid)
     class(cell), intent(in) :: this
     real(prec), intent(in) :: psize, pmid(ndims)
@@ -604,7 +698,7 @@ contains
        if (dk > dmax) then
           dmax = dk
        end if
-       
+
        dk = dk - (0.5_prec * psize)
 
        if (dk > 0.0_prec) then
@@ -616,5 +710,3 @@ contains
   end function accept
 
 end module bhtree_mod
-
- 
