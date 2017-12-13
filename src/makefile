@@ -16,6 +16,9 @@ OBJECTS := $(patsubst %.f90,%.o,$(SRC))
 
 all: bhtree $(DEP_FILE)
 
+test: FCFLAGS += $(DEBUGFLAGS)
+test: $(filter-out main.o, $(OBJECTS))
+
 bhtree: $(OBJECTS)
 	$(FC) $(FCFLAGS) $^ -o $@
 
