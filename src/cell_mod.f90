@@ -8,8 +8,8 @@ module cell_mod
   public :: cell, cell_ptr
 
   type, extends(node) :: cell
-     real(prec) :: rcrit2, quad_moment(ndims,ndims)
-     type(node), pointer :: more
+     real(prec) :: rcrit2, quad_moment(ndims,ndims), center(ndims)
+     class(node), pointer :: more => null()
      type(node_ptr) :: descendants(nsub)
    contains
      procedure :: sub_index => sub_index_cell
@@ -47,26 +47,11 @@ contains
     self%ptr%descendants(index)%ptr => nodeptr
   end subroutine set_desc_ptr
 
-  pure logical function has_child(self, index) result(is_associated)
-    class(cell_ptr), intent(in) :: self
-    integer, intent(in) :: index
-    is_associated = associated(self%ptr)
-  end function has_child
-
-  pure integer function sub_index(self, b) result(index)
-    class(cell_ptr), intent(in) :: self
-    class(node), intent(in) :: b
-
-    integer :: k
-    index = 0
-    
-    do k = 1, ndims
-       if (self%ptr%pos(k) <= b%pos(k)) then
-          index = index + ishft(nsub, -k)
-       end if
-    end do
-    
-  end function sub_index
+  ! pure logical function has_child(self, index) result(is_associated)
+  !   class(cell_ptr), intent(in) :: self
+  !   integer, intent(in) :: index
+  !   is_associated = associated(self%ptr)
+  ! end function has_child
 
    pure integer function sub_index_cell(self, b) result(index)
     class(cell), intent(in) :: self
@@ -80,15 +65,12 @@ contains
           index = index + ishft(nsub, -i)
        end if
     end do
+
+    index = index + 1
     
   end function sub_index_cell
 
-  subroutine split(c)
-    class(cell_ptr), intent(inout) :: c
-    
-  end subroutine split
-
-   pure logical function is_null(cellptr)
+  pure logical function is_null(cellptr)
     class(cell_ptr), intent(in) :: cellptr
     is_null = .not. associated(cellptr%ptr)
   end function is_null
