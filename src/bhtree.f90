@@ -14,10 +14,10 @@ module bhtree_mod
   type :: bhtree
      real(prec) :: theta, eps, eps2, rsize
      logical :: quick_scan = .false., use_quad, bh86, sw94, first_call = .true.
-     integer :: tdepth, num_cells = 0, nbbcalc, nbccalc, actmax, nbodies, actlen
+     integer :: tdepth, ncells, nbbcalc, nbccalc, actmax, nbodies, actlen
      integer :: cell_hist(max_depth), subn_hist(max_depth)
      type(cell), pointer :: root => null()
-     class(node), pointer :: freecell
+     class(node), pointer :: freecell => null()
    contains
      procedure :: expand_box
      procedure :: make_cell
@@ -41,13 +41,12 @@ contains
     type(cell_ptr), allocatable :: interact(:)
     integer :: i
 
-    tree%actlen = 216 * tree%tdepth
+    tree%actlen = 216 * tree%tdepth * 5
 
     allocate(active(tree%actlen))
     allocate(interact(tree%actlen))
 
     do i = 1, tree%actlen
-       !allocate(active(i)%ptr)
        allocate(interact(i)%ptr)
     end do
     
@@ -58,7 +57,8 @@ contains
     tree%nbccalc = 0
 
     active(1)%ptr => tree%root
-    rmid = 0.0_prec   
+    rmid = 0.0_prec
+
     call walk_tree(tree, active, 1, 2, interact, 1, tree%actlen, tree%root, tree%rsize, rmid)
     call cpu_time(cpuend)
     
@@ -83,6 +83,7 @@ contains
     
     tree%root => tree%make_cell()
     tree%root%pos = 0.0_prec
+    tree%root%center = 0.0_prec
 
     call tree%expand_box(body_array)
 
@@ -134,7 +135,7 @@ contains
     end if
 
     tree%root => null()
-    tree%num_cells = 0
+    tree%ncells = 0
     
   end subroutine new_tree
 
@@ -149,30 +150,22 @@ contains
     integer :: i
 
     if (.not. associated(tree%freecell)) then
-       allocate(tree%freecell, mold = freecell)
-       select type (c => tree%freecell)
-       class is(cell)
-          freecell => c
-       class default
-          stop "make_cell: mismatched type, should be cell 1"
-       end select
+       allocate(freecell)
     else
        select type(c => tree%freecell)
        class is(cell)
           freecell => c
-          tree%freecell => freecell%next
-       class default
-          stop "make_cell: mismatched type, should be cell 2"
-       end select
+          tree%freecell => c%next
+       end select       
     end if
-
+   
     freecell%update = .false.
     
     do i = 1, nsub
        freecell%descendants(i)%ptr => null()
     end do
     
-    tree%num_cells = tree%num_cells + 1
+    tree%ncells = tree%ncells + 1
     
   end function make_cell
 
@@ -180,52 +173,49 @@ contains
   !*****************************************************************************
   ! Insert body into tree 
   !*****************************************************************************
-  subroutine load_body(tree, b)
+  subroutine load_body(tree, p)
     class(bhtree) :: tree
-    class(body), target :: b
+    class(body), target :: p
 
     type(cell), pointer  :: q, c
 
-    integer :: q_index, i
-    real(prec) :: qsize, dist2, dist(ndims)
+    integer :: q_index, sub_index, i
+    real(prec) :: qsize, dist2, dr(ndims)
 
 
     q => tree%root
-    q_index = q%sub_index(b)
+    q_index = q%sub_index(p)
     qsize = tree%rsize
 
     do while(associated(q%descendants(q_index)%ptr))
-       select type(child => q%descendants(q_index)%ptr)
+   
+       select type(child => q%descendants(q_index)%ptr)   
        class is(body)
-
-          dist = b%pos - child%pos
-          dist2 = dot_product(dist, dist)
+          dr = p%pos - child%pos
+          dist2 = dot_product(dr, dr)
           if (dist2 == 0.0_prec) stop "two bodies have same position"
-
+          
           c => tree%make_cell()
-
-          do i = 1, ndims
-             if (b%pos(i) < q%pos(i)) then
-                c%pos(i) = q%pos(i) - qsize / 4.0_prec
-             else
-                c%pos(i) = q%pos(i) + qsize / 4.0_prec
-             end if
-          end do
-
-          c%descendants(c%sub_index(child))%ptr => child
+          c%pos = q%pos + (merge(-qsize, qsize, p%pos < q%pos) / 4.0_prec)
+          c%center = q%pos + (merge(-qsize, qsize, p%pos < q%pos) / 4.0_prec)
+          c%length = qsize / 2.0_prec
+          sub_index = c%sub_index(child)
+          c%descendants(sub_index)%ptr => child
           q%descendants(q_index)%ptr => c
-
-          q => c
-         
-       class is(cell)
-          q => child
        end select
 
-       q_index = q%sub_index(b)
+       select type(child => q%descendants(q_index)%ptr)
+       class is(cell)
+          q => child
+       class default
+          stop "not a cell"
+       end select
+
+       q_index = q%sub_index(p)
        qsize = qsize / 2.0_prec
     end do
 
-    q%descendants(q_index)%ptr => b
+    q%descendants(q_index)%ptr => p
 
   end subroutine load_body
   
@@ -370,7 +360,7 @@ contains
 
     do i = 1, nbodies
        do j = 1, ndims
-          d = abs(body_array(i)%ptr%pos(j) - tree%root%pos(j))
+          d = abs(body_array(i)%ptr%pos(j) - tree%root%center(j))
           if (d > dmax) dmax = d
        end do
     end do
@@ -489,6 +479,7 @@ contains
     if (p%update) then
        np = nptr
        actsafe = tree%actlen - nsub
+       
        do i = aptr, nptr - 1
           select type(ap => active(i)%ptr)
           type is(cell)
@@ -522,8 +513,8 @@ contains
           select type(p)
           type is(body)
              call sum_gravity(tree, p, interact, cptr, bptr)
-          class default
-             stop
+          class is(cell)
+             stop "recursion ended with a cell"
           end select
        end if
     end if
@@ -546,11 +537,11 @@ contains
   !*****************************************************************************
   ! Creates an identity matrix
   !*****************************************************************************
-  subroutine walk_sub(tree, active, nptr, np, interact, cptr, bptr, p, psize, pmid)
+  recursive subroutine walk_sub(tree, active, nptr, np, interact, cptr, bptr, p, psize, pmid)
     class(bhtree), intent(in) :: tree
     type(node_ptr), intent(inout) :: active(:)
     type(cell_ptr), intent(inout) :: interact(:)
-    integer, intent(inout) :: nptr, np, cptr, bptr
+    integer, value :: nptr, np, cptr, bptr
     class(node), intent(inout) :: p
     real(prec), intent(in) :: psize, pmid(ndims)
 
@@ -562,14 +553,14 @@ contains
     select type(a => p)
     type is(cell)
        q => a%more
-       do while(should_loop(q, q%next))
+       do while(should_loop(q, a%next))
           nmid = pmid + merge(-poff, poff, q%pos < pmid)
           call walk_tree(tree, active, nptr, np, interact, cptr, bptr, q, psize / 2.0_prec, nmid)
           q => q%next
-          if (.not. associated(q)) exit
+          !if (.not. associated(q)) exit
        end do
     type is(body)
-       nmid = pmid + merge(-poff, poff, q%pos < pmid)
+       nmid = pmid + merge(-poff, poff, p%pos < pmid)
        call walk_tree(tree, active, nptr, np, interact, cptr, bptr, p, psize / 2.0_prec, nmid)
     end select
 
