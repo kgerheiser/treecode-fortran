@@ -1,7 +1,9 @@
 *.o
 *.pdf
 *.mod
+*.x
 src/bhtree
 *.DS_store
 src/my_project.dep
 *~
+*__genmod*
