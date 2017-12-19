@@ -20,10 +20,9 @@ contains
 
   pure function distance_to_squared(self, node_) result(dist2)
     class(node), intent(in) :: self, node_
-    real(prec) :: dist2(ndims), diff(ndims)
-
-    diff = node_%pos - self%pos
-    dist2 = dot_product(diff, diff)
+    real(prec) :: dist2(ndims), dr(ndims)
+    dr = node_%pos - self%pos
+    dist2 = dot_product(dr, dr)
   end function distance_to_squared
 
   pure function distance_to(self, node_) result(dist)
