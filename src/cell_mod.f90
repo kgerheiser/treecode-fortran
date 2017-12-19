@@ -8,11 +8,11 @@ module cell_mod
   public :: cell, cell_ptr
 
   type, extends(node) :: cell
-     real(prec) :: rcrit2, quad_moment(ndims,ndims), center(ndims)
+     real(prec) :: rcrit2, quad_moment(ndims,ndims), center(ndims) = 0.0, length = 1.0
      class(node), pointer :: more => null()
      type(node_ptr) :: descendants(nsub)
    contains
-     procedure :: sub_index => sub_index_cell
+     procedure :: sub_index
   end type cell
 
   type :: cell_ptr
@@ -25,54 +25,37 @@ module cell_mod
 
 contains
 
-  function get_desc_ptr(self, index) result(desc_ptr)
-    class(cell_ptr), intent(in) :: self
-    integer, intent(in) :: index
-    class(node), pointer :: desc_ptr
-    desc_ptr => self%ptr%descendants(index)%ptr
-  end function get_desc_ptr
-
-  subroutine set_ptr(self, cellptr)
-    class(cell_ptr), intent(inout) :: self
-    class(cell_ptr), intent(in) :: cellptr
-
-    self%ptr => cellptr%ptr
-  end subroutine set_ptr
-
-  subroutine set_desc_ptr(self, nodeptr, index)
-    class(cell_ptr), intent(inout) :: self
-    class(node), target, intent(in) :: nodeptr
-    integer, intent(in) :: index
-
-    self%ptr%descendants(index)%ptr => nodeptr
-  end subroutine set_desc_ptr
-
-  ! pure logical function has_child(self, index) result(is_associated)
-  !   class(cell_ptr), intent(in) :: self
-  !   integer, intent(in) :: index
-  !   is_associated = associated(self%ptr)
-  ! end function has_child
-
-   pure integer function sub_index_cell(self, b) result(index)
+  integer function sub_index(self, b) result(index)
     class(cell), intent(in) :: self
     class(node), intent(in) :: b
 
-    integer :: i
+    integer :: k
     index = 0
-    
-    do i = 1, ndims
-       if (self%pos(i) <= b%pos(i)) then
-          index = index + ishft(nsub, -i)
+
+    do k = 1, ndims
+       if (self%pos(k) <= b%pos(k)) then
+          index = index + ishft(nsub, -k)
        end if
     end do
 
     index = index + 1
-    
-  end function sub_index_cell
 
-  pure logical function is_null(cellptr)
-    class(cell_ptr), intent(in) :: cellptr
-    is_null = .not. associated(cellptr%ptr)
-  end function is_null
+  end function sub_index
+
+  pure type(cell) function split(self, index) 
+    class(cell), intent(in) :: self
+    integer, intent(in) :: index
+
+    
+  end function split
+
+  pure logical function in_cell(self, node_)
+    class(cell), intent(in) :: self
+    class(node), intent(in) :: node_
+    in_cell = any(abs(node_%pos - self%center) > self%length / 2.0)
+  end function in_cell
+
+  
+  
   
 end module cell_mod
