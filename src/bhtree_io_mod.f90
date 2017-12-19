@@ -52,4 +52,32 @@ contains
     close(file_unit)
 
   end subroutine write_bodies_to_formatted_file
+
+  pure function allocate_empty_body_array(n) result(body_array)
+    integer, intent(in) :: n
+    type(body_ptr), allocatable :: body_array(:)
+    integer :: i
+
+    allocate(body_array(n))
+
+    do i = 1, n
+       allocate(body_array(i)%ptr)
+    end do
+ 
+  end function allocate_empty_body_array
+
+  subroutine deallocate_body_array(body_array)
+    type(body_ptr), allocatable :: body_array(:)
+    integer :: i, n
+
+    n = size(body_array)
+
+    do i = 1, n
+       deallocate(body_array(i)%ptr)
+    end do
+
+    deallocate(body_array)
+    
+  end subroutine deallocate_body_array
+  
 end module bhtree_io_mod
