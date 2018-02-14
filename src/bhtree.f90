@@ -360,7 +360,6 @@ contains
     end do
 
     p%quad_moment = 0.0_prec
-
     do i = 1, ndesc
        q => desc(i)%ptr
 
@@ -381,9 +380,8 @@ contains
        type is (cell)
           tmpm = tmpm + q%quad_moment
        end select
-
+       
        p%quad_moment = p%quad_moment + tmpm
-
     end do
 
   end subroutine eval_quadrupole_moment
@@ -399,7 +397,7 @@ contains
 
     do i = 1, ndims
        do j = 1, ndims
-          res(j,i) = v(i) * u(j)
+          res(j,i) = u(j) * v(i)
        end do
     end do
     
@@ -641,9 +639,8 @@ contains
     real(prec) :: dr(ndims), qdr(ndims)
     real(prec) :: dr2, drab, phi_p, mr3i, drqdr, dr5i, phi_q
     type(cell), pointer :: p
-
     integer :: i
-
+    
     do i = 1, size(interact) 
        p => interact(i)%ptr
        dr = p%pos - body0%pos
@@ -652,13 +649,12 @@ contains
 
        phi_p = p%mass / drab
        mr3i = phi_p / dr2
-
        qdr = matmul(p%quad_moment, dr)
-       drqdr = dot_product(qdr, qdr)
+       drqdr = dot_product(dr, qdr)
        dr5i = 1.0_prec / (dr2**2 * drab)
        phi_q = 0.5_prec * dr5i * drqdr
        phi0 = phi0 - (phi_p + phi_q)
-       mr3i = 5.0_prec * phi_q / dr2
+       mr3i = mr3i + 5.0_prec * phi_q / dr2
        acc0 = acc0 + (dr * mr3i) + (qdr * -dr5i)
     end do
 
@@ -691,5 +687,6 @@ contains
 
     accept = (dsq > this%rcrit2)! .and. (dmax > (1.5_prec * psize))
   end function accept
+
 
 end module bhtree_mod
