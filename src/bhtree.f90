@@ -27,8 +27,6 @@ module bhtree_mod
   end type bhtree
 
 contains
-
-  
   
   !*****************************************************************************
   ! Initialize tree for hierarchical force calculation
@@ -421,7 +419,7 @@ contains
 
 
   !*****************************************************************************
-  ! Initialize tree for hierarchical force calculation
+  ! Perform force calculation on all particles
   !*****************************************************************************
   subroutine gravcalc(tree)
     class(bhtree), intent(inout) :: tree
@@ -463,7 +461,7 @@ contains
 
 
   !*****************************************************************************
-  ! Creates an identity matrix
+  ! Walk through the tree to calculate forces in a single pass
   !*****************************************************************************
   recursive subroutine walk_tree(tree, active, aptr, nptr, interact, cptr, bptr, p, psize, pmid)
     class(bhtree), intent(in) :: tree
@@ -520,11 +518,47 @@ contains
        end if
     end if
 
-  end subroutine walk_tree
+  contains
 
-  logical function should_loop(q, ap) result(loop)
+    !*****************************************************************************
+    ! Test next level's active list against subnodes of p
+    !*****************************************************************************
+    recursive subroutine walk_sub(tree, active, nptr, np, interact, cptr, bptr, p, psize, pmid)
+      class(bhtree), intent(in) :: tree
+      type(node_ptr), intent(inout) :: active(:)
+      type(cell_ptr), intent(inout) :: interact(:)
+      integer, value :: nptr, np, cptr, bptr
+      class(node), intent(inout) :: p
+      real(prec), intent(in) :: psize, pmid(ndims)
+
+      real(prec) :: poff, nmid(ndims)
+      class(node), pointer :: q
+
+      poff = psize / 4.0_prec
+
+      select type(a => p)
+      type is(cell)
+         q => a%more
+         do while(should_loop(q, a%next))
+            nmid = pmid + merge(-poff, poff, q%pos < pmid)
+            call walk_tree(tree, active, nptr, np, interact, cptr, bptr, q, psize / 2.0_prec, nmid)
+            q => q%next
+         end do
+      type is(body)
+         nmid = pmid + merge(-poff, poff, p%pos < pmid)
+         call walk_tree(tree, active, nptr, np, interact, cptr, bptr, p, psize / 2.0_prec, nmid)
+      end select
+
+    end subroutine walk_sub
+
+    !*****************************************************************************
+    ! Used to control looping through nodes using threading idiom. Necessary
+    ! because in Fortran null() pointers are not associated. Can possibly
+    ! be fixed with having root's next point to a pointer rather than
+    ! just null.
+    !*****************************************************************************
+    logical function should_loop(q, ap) result(loop)
     class(node), pointer :: q, ap
-
     if (.not. associated(q) .and. .not. associated(ap)) then
        loop = .false.
     else if (associated(q, ap)) then
@@ -532,43 +566,13 @@ contains
     else if (.not. associated(q, ap)) then
        loop = .true.
     end if
-
   end function should_loop
 
+  end subroutine walk_tree
+
+ 
   !*****************************************************************************
-  ! Creates an identity matrix
-  !*****************************************************************************
-  recursive subroutine walk_sub(tree, active, nptr, np, interact, cptr, bptr, p, psize, pmid)
-    class(bhtree), intent(in) :: tree
-    type(node_ptr), intent(inout) :: active(:)
-    type(cell_ptr), intent(inout) :: interact(:)
-    integer, value :: nptr, np, cptr, bptr
-    class(node), intent(inout) :: p
-    real(prec), intent(in) :: psize, pmid(ndims)
-
-    real(prec) :: poff, nmid(ndims)
-    class(node), pointer :: q
-
-    poff = psize / 4.0_prec
-
-    select type(a => p)
-    type is(cell)
-       q => a%more
-       do while(should_loop(q, a%next))
-          nmid = pmid + merge(-poff, poff, q%pos < pmid)
-          call walk_tree(tree, active, nptr, np, interact, cptr, bptr, q, psize / 2.0_prec, nmid)
-          q => q%next
-       end do
-    type is(body)
-       nmid = pmid + merge(-poff, poff, p%pos < pmid)
-       call walk_tree(tree, active, nptr, np, interact, cptr, bptr, p, psize / 2.0_prec, nmid)
-    end select
-
-  end subroutine walk_sub
-
-
-  !*****************************************************************************
-  ! Creates an identity matrix
+  ! Calculates the acceleration and potential on a body using the interaction list
   !*****************************************************************************
   subroutine sum_gravity(tree, p0, interact, cptr, bptr)
     class(bhtree), intent(in) :: tree
@@ -599,7 +603,7 @@ contains
 
 
   !*****************************************************************************
-  ! Creates an identity matrix
+  ! Sum body-cell interactions using cell's center-of-mass
   !*****************************************************************************
   subroutine sum_node(tree, interact, body0, phi0, acc0)
     class(bhtree), intent(in) :: tree
@@ -628,7 +632,7 @@ contains
 
 
   !*****************************************************************************
-  ! Creates an identity matrix
+  ! Sum body-cell interactions using quadrupole moment
   !*****************************************************************************
   subroutine sum_cell(tree, interact, body0 , phi0, acc0)
     class(bhtree), intent(in) :: tree
@@ -685,7 +689,7 @@ contains
        if (dk > 0.0_prec) dsq = dsq + dk**2
     end do
 
-    accept = (dsq > this%rcrit2)! .and. (dmax > (1.5_prec * psize))
+    accept = (dsq > this%rcrit2) .and. (dmax > (1.5_prec * psize))
   end function accept
 
 
