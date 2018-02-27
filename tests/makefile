@@ -1,38 +1,50 @@
 PHONY: tests clean all
-include $(PFUNIT)/include/base.mk
-.DEFAULT_GOAL = tests
+.DEFAULT_GOAL = debug
 
-SRCS = $(wildcard *.pf)
-OBJS = $(SRCS:.pf=$(OBJ_EXT))
+include $(PFUNIT)/include/base.mk
 
 SRC_DIR=../src
 TEST_DIR=.
 
-tests: $(OBJS)
+include $(SRC_DIR)/make_include
+
+SRCS = $(wildcard *.pf)
+OBJS = $(SRCS:.pf=$(OBJ_EXT))
+
+SRC_SRCS := $(wildcard $(SRC_DIR)/*.f90)
+SRC_OBJECTS := $(patsubst %.f90,%.o,$(SRC_SRCS))
+SRC_DIR_OBJS = $(filter-out ../src/main.o, $(SRC_OBJECTS))
 
 testSuites.inc: $(SRCS)
 
-FC=ifort
-DEBUGFLAGS := -check all -traceback -g -fstack-protector -warn all -implicitnone
-FFLAGS = $(DEBUGFLAGS)
-FFLAGS += -I$(SRC_DIR) -I$(PFUNIT)/mod
+INC_FLAGS = -I$(SRC_DIR) -I$(PFUNIT)/mod -I$(PFUNIT)/include
+FCFLAGS += $(INC_FLAGS)
 LIBS = -L$(PFUNIT)/lib -lpfunit
 FPPFLAGS=
 
-bhtree:
-	make -C $(SRC_DIR) test
+debug: FCFLAGS += $(DEBUGFLAGS)
+debug: SRC_TARGET = debug
+debug: tests
 
-tests: test.x
+fast: FCFLAGS += $(FASTFLAGS)
+fast: LIBS += -qopenmp
+fast: SRC_TARGET=fast
+fast: tests
+
+bhtree:
+	make -C $(SRC_DIR) $(SRC_TARGET)
+
+tests: bhtree $(OBJS) test.x
 
 test.x: testSuites.inc $(OBJS)
-	$(FC) -o $@ -I$(PFUNIT)/mod -I$(PFUNIT)/include $(PFUNIT)/include/driver.F90 $(TEST_DIR)/*$(OBJ_EXT) $(SRC_DIR)/*$(OBJ_EXT) $(LIBS) $(FPPFLAGS)
+	$(FC) -o $@ $(INC_FLAGS) $(PFUNIT)/include/driver.F90 $(OBJS) $(SRC_DIR_OBJS) $(LIBS) $(FPPFLAGS)
 
 
-%.F90: %.pf bhtree
+%.F90: %.pf
 	$(PFUNIT)/bin/pFUnitParser.py $<  $@
 
 %$(OBJ_EXT): %.F90
-	$(FC) -c $(FFLAGS) $(FPPFLAGS) $<
+	$(FC) -c $(FCFLAGS) $(FPPFLAGS) $<
 
 clean: local-E0-clean
 
