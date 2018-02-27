@@ -19,13 +19,9 @@ module cell_mod
      class(cell), pointer :: ptr => null()
   end type cell_ptr
 
-  type :: cell_list_node
-     type(cell_ptr) :: cellptr, next
-  end type cell_list_node
-
 contains
 
-  integer function sub_index(self, b) result(index)
+ pure integer function sub_index(self, b) result(index)
     class(cell), intent(in) :: self
     class(node), intent(in) :: b
 
