@@ -4,6 +4,7 @@ module bhtree_mod
   use node_mod, only: node, node_ptr
   use cell_mod, only: cell, cell_ptr
   use body_mod, only: body, body_ptr, is_same_body
+  use fconfig
   implicit none
 
   private
@@ -13,7 +14,7 @@ module bhtree_mod
 
   type :: bhtree
      real(prec) :: theta, eps, eps2, rsize
-     logical :: quick_scan = .false., use_quad, bh86, sw94, first_call = .true.
+     logical :: quick_scan = .false., use_quad, bh86, sw94, first_call = .true., print_time = .false.
      integer :: tdepth, ncells, nbbcalc, nbccalc, actmax, nbodies, actlen
      integer :: cell_hist(max_depth), subn_hist(max_depth)
      type(cell), pointer :: root => null()
@@ -24,9 +25,28 @@ module bhtree_mod
      procedure :: new_tree
      procedure :: load_body
      procedure :: eval_center_of_mass
+     procedure :: read_config
+     procedure :: make_tree
+     procedure :: gravcalc
   end type bhtree
 
 contains
+
+  subroutine read_config(tree, file)
+    class(bhtree), intent(inout) :: tree
+    character(*), intent(in) :: file
+
+    type(config) :: conf
+
+    call conf%read_file(file)
+
+    call conf%value_from_key("use_quad", tree%use_quad)
+    call conf%value_from_key("theta", tree%theta)
+    call conf%value_from_key("eps", tree%eps2)
+    call conf%value_from_key("use_quad", tree%use_quad)
+    call conf%value_from_key("use_quad", tree%use_quad)
+    
+  end subroutine read_config
   
   !*****************************************************************************
   ! Initialize tree for hierarchical force calculation
@@ -38,6 +58,7 @@ contains
 
     integer :: i
 
+    call set_update(body_array)
     call tree%new_tree()
     
     tree%root => tree%make_cell()
@@ -57,6 +78,8 @@ contains
     tree%tdepth = 0
     tree%cell_hist = 0
     tree%subn_hist = 0
+    tree%nbbcalc = 0
+    tree%nbccalc = 0
 
     call tree%eval_center_of_mass(tree%root, tree%rsize, 1)
     null_ptr => null()
@@ -68,6 +91,17 @@ contains
     
   end subroutine make_tree
 
+  subroutine set_update(body_array)
+    type(body_ptr), intent(inout) :: body_array(:)
+    integer :: i, n
+
+    n = size(body_array)
+
+    do i = 1, n
+       body_array(i)%ptr%update = .true.
+    end do
+    
+  end subroutine set_update
   
   !*****************************************************************************
   ! Reclaim cells in tree, and prepare to build a new one
@@ -137,10 +171,8 @@ contains
     class(body), target :: p
 
     type(cell), pointer  :: q, c
-
-    integer :: q_index, sub_index, i
+    integer :: q_index, sub_index
     real(prec) :: qsize, dist2, dr(ndims)
-
 
     q => tree%root
     q_index = q%sub_index(p)
@@ -423,7 +455,8 @@ contains
   !*****************************************************************************
   subroutine gravcalc(tree)
     class(bhtree), intent(inout) :: tree
-    real(real64) :: cpustart, cpuend, cputime
+    !    real(real64) :: cpustart, cpuend, cputime
+    integer(int64) :: cpustart, cpuend, cputime, clock_count
     real(prec) :: rmid(ndims)
 
     type(node_ptr), allocatable :: active(:)
@@ -440,7 +473,7 @@ contains
     end do
     
 
-    call cpu_time(cpustart)
+    call system_clock(cpustart)
     tree%actmax = 0
     tree%nbbcalc = 0
     tree%nbccalc = 0
@@ -449,10 +482,10 @@ contains
     rmid = 0.0_prec
 
     call walk_tree(tree, active, 1, 2, interact, 1, tree%actlen, tree%root, tree%rsize, rmid)
-    call cpu_time(cpuend)
+    call system_clock(cpuend, count_rate = clock_count)
     
     cputime = cpuend - cpustart
-    print *, "time: ", cputime
+    if (tree%print_time) print *, "time: ", cputime / real(clock_count)
     
     deallocate(active)
     deallocate(interact)
@@ -464,7 +497,7 @@ contains
   ! Walk through the tree to calculate forces in a single pass
   !*****************************************************************************
   recursive subroutine walk_tree(tree, active, aptr, nptr, interact, cptr, bptr, p, psize, pmid)
-    class(bhtree), intent(in) :: tree
+    class(bhtree), intent(inout) :: tree
     type(node_ptr), intent(inout) :: active(:)
     type(cell_ptr), intent(inout) :: interact(:)
     integer, value :: aptr, nptr, cptr, bptr
@@ -524,7 +557,7 @@ contains
     ! Test next level's active list against subnodes of p
     !*****************************************************************************
     recursive subroutine walk_sub(tree, active, nptr, np, interact, cptr, bptr, p, psize, pmid)
-      class(bhtree), intent(in) :: tree
+      class(bhtree), intent(inout) :: tree
       type(node_ptr), intent(inout) :: active(:)
       type(cell_ptr), intent(inout) :: interact(:)
       integer, value :: nptr, np, cptr, bptr
@@ -575,30 +608,38 @@ contains
   ! Calculates the acceleration and potential on a body using the interaction list
   !*****************************************************************************
   subroutine sum_gravity(tree, p0, interact, cptr, bptr)
-    class(bhtree), intent(in) :: tree
+    class(bhtree), intent(inout) :: tree
     class(body), intent(inout) :: p0
     type(cell_ptr), intent(inout) :: interact(:)
     integer, intent(in) :: cptr, bptr
 
-    real(prec) :: pos0(ndims), acc0(ndims), phi0
+    real(prec) :: acc0_bb(ndims), acc0_bc(ndims), phi0_bb, phi0_bc
 
-    pos0 = p0%pos
-    phi0 = 0.0_prec
-    acc0 = 0.0_prec
+    phi0_bb = 0.0_prec
+    phi0_bc = 0.0_prec
+    
+    acc0_bb = 0.0_prec
+    acc0_bc = 0.0_prec
 
+    !!$omp parallel sections shared(tree, interact, p0, cptr, bptr) &
+    !!$omp& firstprivate(phi0_bc, acc0_bc, phi0_bb, acc0_bb) num_threads(2) &
+    !!$omp& lastprivate(phi0_bc, acc0_bc, phi0_bb, acc0_bb)
+    !!$omp section
     if (tree%use_quad) then
-       call sum_cell(tree, interact(:cptr-1), p0, phi0, acc0)
+       call sum_cell(tree, interact(:cptr-1), p0, phi0_bc, acc0_bc)
     else
-       call sum_node(tree, interact(:cptr-1), p0, phi0, acc0)
+       call sum_node(tree, interact(:cptr-1), p0, phi0_bc, acc0_bc)
     end if
 
-    call sum_node(tree, interact(bptr+1:), p0, phi0, acc0)
+    !!$omp section
+    call sum_node(tree, interact(bptr+1:), p0, phi0_bb, acc0_bb)
+    !!$omp end parallel sections
+    
+    p0%phi = phi0_bc + phi0_bb
+    p0%acc = acc0_bc + acc0_bb
 
-    p0%phi = phi0
-    p0%acc = acc0
-
-    ! tree%nbbcalc = tree%nbbcalc + size(interact(btpr:))
-    ! tree%nbccalc = tree%nbccalc + size(interact(:cptr))
+    tree%nbbcalc = tree%nbbcalc + size(interact(bptr+1:))
+    tree%nbccalc = tree%nbccalc + size(interact(:cptr-1))
   end subroutine sum_gravity
 
 
@@ -621,7 +662,6 @@ contains
        dr = p%pos - body0%pos
        dr2 = dot_product(dr, dr) + tree%eps2
        drab = sqrt(dr2)
-
        phi_p = p%mass / drab
        phi0 = phi0 - phi_p
        mr3i = phi_p / dr2
