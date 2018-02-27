@@ -1,10 +1,15 @@
 module bhtree_io_mod
   use constants_mod
   use body_mod, only: body_ptr
+  use bhtree_mod, only: bhtree
   implicit none
   
 contains
 
+
+  !*****************************************************************************
+  ! 
+  !*****************************************************************************
   function read_bodies_from_formatted_file(file) result(body_array)
     character(*), intent(in) :: file
     integer :: i, file_unit, n
@@ -28,7 +33,10 @@ contains
            
   end function read_bodies_from_formatted_file
 
-  
+
+  !*****************************************************************************
+  ! 
+  !*****************************************************************************
   subroutine write_bodies_to_formatted_file(file, body_array)
     character(*), intent(in) :: file
     type(body_ptr), intent(in) :: body_array(:)
@@ -53,6 +61,10 @@ contains
 
   end subroutine write_bodies_to_formatted_file
 
+
+  !*****************************************************************************
+  ! 
+  !*****************************************************************************
   pure function allocate_empty_body_array(n) result(body_array)
     integer, intent(in) :: n
     type(body_ptr), allocatable :: body_array(:)
@@ -66,6 +78,10 @@ contains
  
   end function allocate_empty_body_array
 
+
+  !*****************************************************************************
+  ! 
+  !*****************************************************************************
   subroutine deallocate_body_array(body_array)
     type(body_ptr), allocatable :: body_array(:)
     integer :: i, n
