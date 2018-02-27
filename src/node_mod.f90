@@ -2,12 +2,9 @@ module node_mod
   use constants_mod, only: prec, ndims
   implicit none
 
-  integer, parameter :: body_type = 0
-  integer, parameter :: cell_type = 1
-
   type, abstract :: node
-     logical :: update = .true.
-     real(prec) :: mass = 0.0_prec, pos(ndims) = 0.0_prec
+     logical :: update
+     real(prec) :: mass, pos(ndims)
      class(node), pointer :: next => null()
    contains
   end type node
@@ -32,5 +29,14 @@ contains
     diff = node_%pos - self%pos
     dist = norm2(diff)
   end function distance_to
+
+  pure function acceleration_to(self, b) result(acc)
+    class(node), intent(in) :: self, b
+    real(prec) :: acc(ndims), dr(ndims), r2, r
+    dr = b%pos - self%pos
+    r2 = dot_product(dr, dr)
+    r = sqrt(r2)    
+    acc = b%mass / (r2 * r) * dr
+  end function acceleration_to
 
 end module node_mod
