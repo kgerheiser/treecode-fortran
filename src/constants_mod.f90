@@ -6,7 +6,7 @@ module constants_mod
 
   integer, parameter :: ndims = 3
   integer, parameter :: nsub = 2**ndims
-  integer, parameter :: prec = real32
+  integer, parameter :: prec = real64
 
 contains
 end module constants_mod
