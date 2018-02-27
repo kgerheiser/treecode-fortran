@@ -13,6 +13,7 @@ module cell_mod
      type(node_ptr) :: descendants(nsub)
    contains
      procedure :: sub_index
+     procedure :: in_cell
   end type cell
 
   type :: cell_ptr
@@ -46,7 +47,7 @@ contains
   pure logical function in_cell(self, node_)
     class(cell), intent(in) :: self
     class(node), intent(in) :: node_
-    in_cell = any(abs(node_%pos - self%center) > self%length / 2.0)
+    in_cell = .not. any(abs(node_%pos - self%center) > self%length / 2.0)
   end function in_cell
 
   

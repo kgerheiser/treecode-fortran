@@ -14,6 +14,22 @@ module bhtreeTest
 
 contains
 
+  @test
+  subroutine test_expand_box()
+    type(body_ptr), allocatable :: body_array(:)
+    integer :: i, n
+    type(bhtree) :: tree
+
+    body_array = read_bodies_from_formatted_file("test_files/Plummer-500.in")
+    n = size(body_array)
+
+    call tree%make_tree(body_array)
+    
+    do i = 1, n
+       @assertTrue(tree%root%in_cell(body_array(i)%ptr))
+    end do
+    
+  end subroutine test_expand_box
 
   @test
   subroutine test_eval_center_of_mass()

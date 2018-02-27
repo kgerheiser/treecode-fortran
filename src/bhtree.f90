@@ -361,6 +361,7 @@ contains
     end do
 
     tree%rsize = rsize
+    tree%root%length = rsize
     
   end subroutine expand_box
 
