@@ -8,261 +8,76 @@ module bhtreeTest
   use constants_mod
 
   implicit none
+  
+  integer, parameter :: random_seed = 87562618
+  real(prec), parameter :: eps2 = 0.025_prec**2
 
 contains
-  
-  @test
-  subroutine test_new_tree()
-    type(bhtree) :: tree
 
-    @assertTrue(tree%first_call)
-    call tree%new_tree()
-    @assertFalse(tree%first_call)
-    @assertNotAssociated(tree%root)
-
-  end subroutine test_new_tree
-
-  @test
-  subroutine test_make_cell()
-    type(bhtree) :: tree
-    type(cell), pointer :: freecell
-
-    call tree%new_tree()
-    freecell => tree%make_cell()
-    @assertAssociated(freecell)
-    @assertEqual(1, tree%num_cells)
-
-  end subroutine test_make_cell
-
-  @test
-  subroutine test_expand_box()
-    type(body_ptr), allocatable :: body_array(:)
-    integer :: n
-    type(bhtree) :: tree
-
-    body_array = read_bodies_from_formatted_file("test_files/8_body_root_cell.txt")
-    n = size(body_array)
-
-    call tree%new_tree()
-
-    tree%root => tree%make_cell()
-    tree%root%pos = 0.0_prec
-
-    call tree%expand_box(body_array)
-    @assertEqual(1.0, tree%rsize)
-
-  end subroutine test_expand_box
-
-  @test
-  subroutine test_read_bodies_from_formatted_file()
-    type(body_ptr), allocatable :: body_array(:)
-    integer :: n
-
-    body_array = read_bodies_from_formatted_file("test_files/8_body_root_cell.txt")
-    n = size(body_array)
-    @assertEqual(8, n)
-
-    @assertEqual(body_array(1)%ptr%mass, 1.0)
-    @assertEqual(body_array(1)%ptr%pos(1), 0.5)
-    @assertEqual(body_array(1)%ptr%vel(1), 0.0)
-
-  end subroutine test_read_bodies_from_formatted_file
-
-
-  @test
-  subroutine test_load_body()
-    type(body_ptr), allocatable :: body_array(:)
-    integer :: i, n
-    type(bhtree) :: tree
-
-    body_array = read_bodies_from_formatted_file("test_files/8_body_root_cell.txt")
-    n = size(body_array)
-
-    call tree%new_tree()
-
-    tree%root => tree%make_cell()
-    tree%root%pos = 0.0_prec
-
-    call tree%expand_box(body_array)
-
-    do i = 1, n
-       call tree%load_body(body_array(i)%ptr)
-    end do
-
-  end subroutine test_load_body
 
   @test
   subroutine test_eval_center_of_mass()
     type(body_ptr), allocatable :: body_array(:)
     integer :: i, n
     type(bhtree) :: tree
+    real(real64) :: analytic_center_of_mass(3)
 
-    body_array = read_bodies_from_formatted_file("test_files/8_body_root_cell.txt")
+    body_array = read_bodies_from_formatted_file("test_files/Plummer-500.in")
     n = size(body_array)
 
-    call tree%new_tree()
+    analytic_center_of_mass = center_of_mass(body_array)
 
-    tree%root => tree%make_cell()
-    tree%root%pos = 0.0_prec
+    call tree%make_tree(body_array)
 
-    call tree%expand_box(body_array)
+    associate(root => tree%root)
+      do i = 1, ndims
+         @assertEqual(root%pos(i), analytic_center_of_mass(i), tolerance = 10.0_prec * epsilon(1.0_prec))
+      end do
+    end associate
 
-    do i = 1, n
-       call tree%load_body(body_array(i)%ptr)
-    end do
+  contains
 
-    call tree%eval_center_of_mass(tree%root, tree%rsize, 1)
-
-    do i = 1, ndims
-       @assertEqual(tree%root%pos(i), 0.0)
-    end do
+    pure function center_of_mass(body_array)
+      type(body_ptr), intent(in) :: body_array(:)
+      real(real64) :: pos_sum(3), total_mass, center_of_mass(3)
+      integer :: i, n
+      n = size(body_array)
+      pos_sum = 0d0
+      total_mass = 0d0        
+      do i = 1, n
+         associate(b => body_array(i)%ptr)
+           pos_sum = pos_sum + b%mass * b%pos
+           total_mass = total_mass + b%mass
+         end associate
+      end do
+      center_of_mass = pos_sum / total_mass        
+    end function center_of_mass
 
   end subroutine test_eval_center_of_mass
 
 
   @test
   subroutine test_thread_tree()
-    type(body_ptr), allocatable :: body_array(:)
-    integer :: i, n, num_bodies, num_cells
-    type(bhtree) :: tree
-    class(node), pointer :: null_ptr
-    type(node_ptr) :: p
+    ! type(body_ptr), allocatable :: body_array(:)
+    ! integer :: i, n, num_bodies, ncells
+    ! type(bhtree) :: tree
+    ! class(node), pointer :: null_ptr
+    ! type(node_ptr) :: p
 
-    body_array = read_bodies_from_formatted_file("test_files/8_body_root_cell.txt")
-    n = size(body_array)
-
-    call tree%new_tree()
-
-    tree%root => tree%make_cell()
-    tree%root%pos = 0.0_prec
-
-    call tree%expand_box(body_array)
-
-    do i = 1, n
-       call tree%load_body(body_array(i)%ptr)
-    end do
-
-    call tree%eval_center_of_mass(tree%root, tree%rsize, 1)
-
-    null_ptr => null()
-    call thread_tree(tree%root, null_ptr)
-    
-    p%ptr => tree%root
-    num_bodies = 0
-    num_cells = 0
-
-    @assertNotAssociated(tree%root%next)
-    @assertNotAssociated(tree%root%descendants(8)%ptr%next)
-
-    do i = 1, 7
-       @assertAssociated(tree%root%descendants(i)%ptr%next, tree%root%descendants(i+1)%ptr)
-    end do
-    
-    do while(associated(p%ptr))
-       select type(a => p%ptr)
-       class is (cell)
-          p%ptr => a%more
-          @assertAssociated(p%ptr, a%descendants(1)%ptr)
-          num_cells = num_cells + 1
-       class is (body)
-          num_bodies = num_bodies + 1
-          p%ptr => p%ptr%next
-       end select
-    end do
-
-    @assertEqual(tree%num_cells, num_cells)
-    @assertEqual(n, num_bodies)
 
   end subroutine test_thread_tree
 
 
-  @test
-  subroutine test_eval_quadrupole_moment()
-    type(body_ptr), allocatable :: body_array(:)
-    integer :: i, n, num_bodies, num_cells
-    type(bhtree) :: tree
-    class(node), pointer :: null_ptr
-    type(node_ptr) :: p
-    
-     body_array = read_bodies_from_formatted_file("test_files/8_body_root_cell.txt")
-    n = size(body_array)
-
-    call tree%new_tree()
-
-    tree%root => tree%make_cell()
-    tree%root%pos = 0.0_prec
-
-    call tree%expand_box(body_array)
-
-    do i = 1, n
-       call tree%load_body(body_array(i)%ptr)
-    end do
-
-    tree%use_quad = .true.
-    tree%bh86 = .true.
-    
-    tree%tdepth = 0
-    tree%cell_hist = 0
-    tree%subn_hist = 0
-
-    call tree%eval_center_of_mass(tree%root, tree%rsize, 1)
-    
-    null_ptr => null()
-    call thread_tree(tree%root, null_ptr)
-    
-    p%ptr => tree%root
-    num_bodies = 0
-    num_cells = 0
-
-    if (tree%use_quad) then
-       call eval_quadrupole_moment(tree%root)
-    end if
-    
-  end subroutine test_eval_quadrupole_moment
-
-  @test
-  subroutine test_set_critical_radius()
-   
-  end subroutine test_set_critical_radius
-
-  @test
-  subroutine test_gravcalc()
-    use constants_mod
-    type(body_ptr), allocatable :: body_array(:), body_array2(:)
-    !integer :: i, n, num_bodies, num_cells
-    integer :: i, j, n
-    type(bhtree) :: tree
-
-    body_array = read_bodies_from_formatted_file("test_files/8_body_root_cell.txt")
-    body_array2 = read_bodies_from_formatted_file("test_files/8_body_root_cell.txt")
-    n = size(body_array)
-
-    tree%use_quad = .true.
-    tree%bh86 = .true.
-    
-    call make_tree(tree, body_array)
-    call gravcalc(tree)
-
-    call array_force(body_array2)
-
-    do i = 1, n
-       do j = 1, ndims
-          @assertEqual(body_array(i)%ptr%acc(j), body_array2(i)%ptr%acc(j))
-       end do
-    end do
-
-  end subroutine test_gravcalc
-
-  function force(b1, b2) result(acc)
+  pure function force(b1, b2) result(acc)
     use iso_fortran_env
     type(body), intent(in) :: b1, b2
-    real(real64) :: acc(3), dr(3), r2, r
+    real(real64) :: acc(ndims), dr(ndims), r2, r
 
     dr = b2%pos - b1%pos
-    r2 = dot_product(dr, dr)
+    r2 = dot_product(dr, dr) + eps2
     r = sqrt(r2)
-    
-    acc = (b2%mass / r2) * (dr / r)
+
+    acc = b2%mass / (r2 * r) * dr
   end function force
 
   subroutine array_force(body_array)
@@ -270,10 +85,11 @@ contains
     type(body_ptr), intent(inout) :: body_array(:)
     type(body) :: b1, b2
     integer i, j, n
-    real(prec) :: acc(3)
+    real(prec) :: acc(ndims)
 
     n = size(body_array)
-    
+
+    !$omp parallel do private(i, j, b1, b2) shared(body_array, n)
     do i = 1, n
        b1 = body_array(i)%ptr
        do j = 1, n          
@@ -285,7 +101,176 @@ contains
        end do
        body_array(i)%ptr%acc = b1%acc
     end do
-    
+
   end subroutine array_force
-  
+
+
+  !*****************************************************************************
+  ! Opening angle set to 0.0 so all forces should be calculated exactly
+  !  and compare to direct summation
+  !*****************************************************************************
+  @test
+  subroutine test_gravcalc_exact()
+    type(body_ptr), allocatable :: body_array(:), body_array2(:)
+    integer :: i, n, j
+    type(bhtree) :: tree
+    character(len=256) :: test_file
+    type(body) :: a, b
+
+    test_file = "test_files/Plummer-500.in"
+
+    body_array = read_bodies_from_formatted_file(test_file)
+    body_array2 = read_bodies_from_formatted_file(test_file)
+
+    n = size(body_array)
+
+    tree%use_quad = .false.
+    tree%bh86 = .true.
+    tree%theta = 0.0d0
+    tree%quick_scan = .false.
+    tree%eps2 = eps2
+
+    call tree%make_tree(body_array)
+    call tree%gravcalc()
+
+    call array_force(body_array2)
+
+    do i = 1, n
+       a = body_array(i)%ptr
+       b = body_array2(i)%ptr
+       do j = 1, ndims
+          @assertEqual(a%acc(j), b%acc(j), tolerance=epsilon(1.0_prec) * 1e2_prec)           
+       end do
+    end do
+
+  end subroutine test_gravcalc_exact
+
+  @test
+  subroutine test_gravcalc_cells()
+    type(body_ptr), allocatable :: body_array(:), body_array2(:)
+    integer :: i, n, j
+    type(bhtree) :: tree
+    character(len=256) :: test_file
+    type(body) :: a, b
+    real(real64) :: percent_diff
+
+    test_file = "test_files/Plummer-500.in"
+
+    body_array = read_bodies_from_formatted_file(test_file)
+    body_array2 = read_bodies_from_formatted_file(test_file)
+
+    n = size(body_array)
+
+    tree%use_quad = .false.
+    tree%bh86 = .true.
+    tree%theta = 0.25d0
+    tree%quick_scan = .false.
+    tree%eps2 = eps2
+
+    call tree%make_tree(body_array)     
+    call gravcalc(tree)
+
+    call array_force(body_array2)
+
+    do i = 1, n
+       a = body_array(i)%ptr
+       b = body_array2(i)%ptr       
+       do j = 1, ndims
+          percent_diff = (b%acc(j) - a%acc(j)) / b%acc(j)
+          @assertLessThan(percent_diff, 0.1_prec)           
+       end do
+    end do
+
+  end subroutine test_gravcalc_cells
+
+  @test
+  subroutine test_gravcalc_decreasing_error()
+    type(body_ptr), allocatable :: body_array(:), body_array2(:)
+    integer :: n
+    type(bhtree) :: tree
+    character(len=256) :: test_file
+    real(real64) :: theta_increment, theta_end, current_error, previous_error
+
+    test_file = "test_files/Plummer-500.in"
+
+    body_array = read_bodies_from_formatted_file(test_file)
+    body_array2 = read_bodies_from_formatted_file(test_file)
+
+    n = size(body_array)
+
+    tree%use_quad = .false.
+    tree%bh86 = .true.
+    tree%theta = 1.0d0
+    tree%quick_scan = .false.
+    tree%eps2 = eps2
+    tree%print_time = .false.
+
+    theta_increment = 0.2
+    theta_end = 0d0
+    previous_error = 1d16
+
+    call array_force(body_array2)
+
+    do while(tree%theta > theta_end)
+       call tree%make_tree(body_array)     
+       call tree%gravcalc()
+       current_error = cumulative_error(body_array2, body_array)
+       @assertLessThan(current_error, previous_error)
+       tree%theta = tree%theta - theta_increment
+    end do
+
+  end subroutine test_gravcalc_decreasing_error
+
+  @test
+  subroutine test_gravcalc_quad()
+    type(body_ptr), allocatable :: body_array(:), body_array2(:)
+    integer :: n
+    type(bhtree) :: tree
+    character(len=256) :: test_file
+    real(real64) :: quad_error, no_quad_error
+
+    test_file = "test_files/Plummer-500.in"
+
+    body_array = read_bodies_from_formatted_file(test_file)
+    body_array2 = read_bodies_from_formatted_file(test_file)
+
+    n = size(body_array)
+
+    tree%use_quad = .true.
+    tree%bh86 = .true.
+    tree%theta = 1.0d0
+    tree%quick_scan = .false.
+    tree%eps2 = eps2
+    tree%print_time = .false.
+
+    call array_force(body_array2)
+
+    tree%use_quad = .true.
+    call tree%make_tree(body_array)     
+    call tree%gravcalc()
+    quad_error = cumulative_error(body_array2, body_array)
+
+    tree%use_quad = .false.
+    call tree%make_tree(body_array)     
+    call tree%gravcalc()
+    no_quad_error = cumulative_error(body_array2, body_array)
+
+    @assertLessThan(quad_error, no_quad_error)
+
+  end subroutine test_gravcalc_quad
+
+  pure function cumulative_error(body_array_exact, body_array_estimate) result(error)
+    type(body_ptr), intent(in) :: body_array_exact(:), body_array_estimate(:)
+    real(real64) :: error, diff(3)
+    integer :: i, n
+
+    n = size(body_array_exact)
+    error = 0d0
+    do i = 1, n
+       diff = abs(body_array_exact(i)%ptr%acc - body_array_estimate(i)%ptr%acc)
+       error = error + sqrt(dot_product(diff, diff))
+    end do
+  end function cumulative_error
+
+
 end module bhtreeTest
