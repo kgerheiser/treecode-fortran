@@ -7,7 +7,7 @@ module body_mod
   public :: body, body_ptr, is_same_body
 
   type, extends(node) :: body
-     real(prec) :: vel(ndims) = 0.0_prec, acc(ndims) = 0.0_prec, phi = 0.0_prec
+     real(prec) :: vel(ndims), acc(ndims), phi
    contains
   end type body
 
