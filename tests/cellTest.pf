@@ -1,9 +1,0 @@
-@test
- subroutine test_sub_index()
-   use pfunit_mod
-   use bhtree_mod
-   use body_mod
-   use cell_mod, only: cell
-
-   
- end subroutine test_sub_index
