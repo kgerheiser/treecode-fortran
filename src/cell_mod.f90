@@ -1,6 +1,6 @@
 module cell_mod
   use constants_mod, only: prec, nsub, ndims
-  use node_mod, only: node, node_ptr, cell_type
+  use node_mod, only: node, node_ptr
   use body_mod, only: body
   implicit none
 
@@ -8,7 +8,7 @@ module cell_mod
   public :: cell, cell_ptr
 
   type, extends(node) :: cell
-     real(prec) :: rcrit2, quad_moment(ndims,ndims), center(ndims) = 0.0, length = 1.0
+     real(prec) :: rcrit2, quad_moment(ndims,ndims), center(ndims), length
      class(node), pointer :: more => null()
      type(node_ptr) :: descendants(nsub)
    contains
@@ -42,12 +42,10 @@ contains
 
   end function sub_index
 
-  pure type(cell) function split(self, index) 
-    class(cell), intent(in) :: self
-    integer, intent(in) :: index
-
-    
-  end function split
+  ! pure type(cell) function split(self, index) 
+  !   class(cell), intent(in) :: self
+  !   integer, intent(in) :: index    
+  ! end function split
 
   pure logical function in_cell(self, node_)
     class(cell), intent(in) :: self
