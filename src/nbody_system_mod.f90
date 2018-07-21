@@ -9,21 +9,23 @@ module nbody_system_mod
 
   type, abstract :: nbody_system
      real(real64) :: dt, t_end, t_start, t
-     integer :: nbodies, random_seed, nstep, total_steps
+     integer :: nbodies, random_seed, current_step, total_steps
      type(body_ptr), allocatable :: body_array(:)
-     procedure(system_interface), pointer, private :: integrator => leap_frog_integrator
+     procedure(system_interface), pointer, private :: integrator
      type(config) :: conf
+     logical :: verbose = .true.
    contains
      procedure(system_interface), deferred :: initialize
+     procedure(system_interface), deferred :: step
      procedure(system_interface), deferred :: finalize
      procedure :: calculate_acceleration
      procedure :: set_integrator
      procedure :: integrate
      procedure :: should_advance
-     procedure :: step_system
-     procedure :: new_nbody_system
      procedure :: run
   end type nbody_system
+
+
 
   abstract interface
      subroutine system_interface(system)
@@ -34,71 +36,48 @@ module nbody_system_mod
 
 contains
 
-  
-  subroutine new_nbody_system(system, file)
-    class(nbody_system), intent(inout) :: system
-    character(*), intent(in) :: file
-    type(config) :: conf
 
-    call conf%read_file(file)
-    call conf%value_from_key("dt", system%dt)
-    call conf%value_from_key("t_start", system%t_start, default_value = 0d0)
-    call conf%value_from_key("t_end", system%t_end)
-    call conf%value_from_key("random_seed", system%random_seed, default_value = 0)
-
-    system%conf = conf
-    system%nstep = 0
-    system%t = system%t_start
-
-    system%total_steps = nint((system%t_end - system%t_start) / system%dt)
-
-  end subroutine new_nbody_system
-
-  
   subroutine set_integrator(system, integrator)
     class(nbody_system), intent(inout) :: system
     procedure(system_interface) :: integrator
     system%integrator => integrator
   end subroutine set_integrator
 
-  
-   subroutine integrate(system)
-     class(nbody_system), intent(inout) :: system
-     call system%integrator()
-  end subroutine integrate
 
-  
-  subroutine step_system(system)
+  subroutine integrate(system)
     class(nbody_system), intent(inout) :: system
-    call system%integrate()
-    system%nstep = system%nstep + 1
-    system%t = system%t + system%dt
-  end subroutine step_system
+    call system%integrator()
+  end subroutine integrate
 
 
   subroutine run(system)
     class(nbody_system), intent(inout) :: system
 
     call system%initialize()
-    
+
     do while(system%should_advance())
-       call system%step_system()       
+       if (system%verbose) print *, "Advancing system 1 step..."
+       call system%step()
+       system%current_step = system%current_step + 1
+       system%t = system%t + system%dt
     end do
 
     call system%finalize()
-    
-  end subroutine run
 
- pure logical function should_advance(system)
-   class(nbody_system), intent(in) :: system
-   
-    if (system%nstep < system%total_steps) then
+  end subroutine run
+  
+
+  pure logical function should_advance(system)
+    class(nbody_system), intent(in) :: system
+
+    if (system%current_step < system%total_steps) then
        should_advance = .true.
     else
        should_advance = .false.
     end if
   end function should_advance
 
+  
   subroutine leap_frog_integrator(system)
     class(nbody_system), intent(inout) :: system
     class(body), pointer :: b
@@ -123,6 +102,7 @@ contains
 
   end subroutine leap_frog_integrator
 
+  
   subroutine calculate_acceleration(system)
     class(nbody_system), intent(inout) :: system
     integer :: i, j, n
@@ -142,3 +122,6 @@ contains
   end subroutine calculate_acceleration
 
 end module nbody_system_mod
+
+
+
