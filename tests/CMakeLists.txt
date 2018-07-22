@@ -17,11 +17,12 @@ foreach(test ${test_files})
 
     add_custom_command(
         OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/generated/${test_we}.F90
+	DEPENDS ${test_we}.pf
         COMMAND ${PFUNIT_DIR}/bin/pFUnitParser.py ${test} ${CMAKE_CURRENT_BINARY_DIR}/generated/${test_we}.F90
     )
 
     list(APPEND test_sources ${CMAKE_CURRENT_BINARY_DIR}/generated/${test_we}.F90)
-    message("test_source: ${test_sources}")
+    message("test_source:" ${test_we})
     
     file(APPEND ${CMAKE_CURRENT_BINARY_DIR}/generated/testSuites.inc "ADD_TEST_SUITE(${test_we}_suite)\n")
 
