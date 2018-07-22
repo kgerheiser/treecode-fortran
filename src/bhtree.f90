@@ -11,7 +11,7 @@ module bhtree_mod
   public :: thread_tree, eval_quadrupole_moment, gravcalc, make_tree
 
   integer, parameter :: max_depth = 32
-  logical, parameter :: use_test = .false. 
+  logical, parameter :: use_test = .false.
  
   type, public :: bhtree
      real(prec) :: theta, eps2, rsize
@@ -26,37 +26,59 @@ module bhtree_mod
      procedure :: new_tree
      procedure :: load_body
      procedure :: eval_center_of_mass
-     procedure :: read_config, read_config_file
      procedure :: make_tree
      procedure :: gravcalc
   end type bhtree
 
+  type, abstract :: cell_opening_criteria
+  end type cell_opening_criteria
+
+  type, extends(cell_opening_criteria) :: bh86_criterion
+  end type bh86_criterion
+
+  type, extends(cell_opening_criteria) :: sw94_criterion     
+  end type sw94_criterion
+
+  interface bhtree
+     module procedure new_bhtree
+  end interface bhtree
+
 contains
+  
 
-  subroutine read_config_file(tree, file)
-    class(bhtree), intent(inout) :: tree
-    character(*), intent(in) :: file
+  pure function new_bhtree(theta, epsilon, use_quad, quick_scan, opening_criterion) result(tree)
+    type(bhtree) :: tree
+    real(prec), intent(in) :: theta, epsilon
+    logical, optional, intent(in) :: use_quad, quick_scan
+    class(cell_opening_criteria), optional, intent(in) :: opening_criterion
 
-    type(config) :: conf
-    
-    call conf%read_file(file)
-    call tree%read_config(conf)
-    
-  end subroutine read_config_file
+    tree%theta = theta
+    tree%eps2 = epsilon**2
 
-  subroutine read_config(tree, conf)
-    class(bhtree), intent(inout) :: tree
-    type(config), intent(in) :: conf
+    if (present(use_quad)) then
+       tree%use_quad = use_quad       
+    else
+       tree%use_quad = .false.
+    end if
 
-    call conf%value_from_key("theta", tree%theta)
-    call conf%value_from_key("eps", tree%eps2)
-    tree%eps2 = tree%eps2**2
-    call conf%value_from_key("use_quad", tree%use_quad, default_value = .false.)
-    call conf%value_from_key("quick_scan", tree%quick_scan, default_value = .false.)
-    call conf%value_from_key("bh86", tree%bh86, default_value = .true.)
-    call conf%value_from_key("sw94", tree%sw94, default_value = .false.)
+    if (present(quick_scan)) then
+       tree%quick_scan = quick_scan
+    else
+       tree%quick_scan = .false.
+    end if
 
-  end subroutine read_config
+    if (present(opening_criterion)) then
+       select type(opening_criterion)
+       type is(bh86_criterion)
+          tree%bh86 = .true.
+       type is(sw94_criterion)
+          tree%sw94 = .true.
+        class default
+           tree%bh86 = .true.
+       end select
+    end if
+
+  end function new_bhtree
 
   !*****************************************************************************
   ! Initialize tree for hierarchical force calculation
