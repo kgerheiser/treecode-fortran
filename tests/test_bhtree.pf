@@ -184,7 +184,7 @@ contains
     tree%eps2 = eps2
 
     call tree%make_tree(body_array)     
-    call gravcalc(tree)
+    call tree%gravcalc()
 
     call array_force(body_array2)
 

@@ -8,12 +8,12 @@ module bhtree_mod
   implicit none
 
   private
-  public :: thread_tree, eval_quadrupole_moment, gravcalc, make_tree
+  public :: bhtree
 
   integer, parameter :: max_depth = 32
   logical, parameter :: use_test = .false.
  
-  type, public :: bhtree
+  type :: bhtree
      real(prec) :: theta, eps2, rsize
      logical :: quick_scan, use_quad, bh86, sw94, first_call = .true., print_time = .false.
      integer :: tdepth, ncells, nbbcalc, nbccalc, actmax, nbodies, actlen
