@@ -74,6 +74,7 @@ contains
           tree%sw94 = .true.
         class default
            tree%bh86 = .true.
+           tree%sw94 = .false.
        end select
     end if
 

@@ -11,6 +11,7 @@ module test_bhtree
   
   integer, parameter :: random_seed = 87562618
   real(prec), parameter :: eps2 = 0.025_prec**2
+  real(prec), parameter :: eps = 0.025_prec
 
 contains
 
@@ -140,11 +141,7 @@ contains
 
     n = size(body_array)
 
-    tree%use_quad = .false.
-    tree%bh86 = .true.
-    tree%theta = 0.0d0
-    tree%quick_scan = .false.
-    tree%eps2 = eps2
+    tree = bhtree(theta = 0.0_prec, epsilon = eps)
 
     call tree%make_tree(body_array)
     call tree%gravcalc()
@@ -177,11 +174,7 @@ contains
 
     n = size(body_array)
 
-    tree%use_quad = .false.
-    tree%bh86 = .true.
-    tree%theta = 0.25d0
-    tree%quick_scan = .false.
-    tree%eps2 = eps2
+    tree = bhtree(theta = 0.25_prec, epsilon = eps)
 
     call tree%make_tree(body_array)     
     call tree%gravcalc()
@@ -214,12 +207,7 @@ contains
 
     n = size(body_array)
 
-    tree%use_quad = .false.
-    tree%bh86 = .true.
-    tree%theta = 1.0d0
-    tree%quick_scan = .false.
-    tree%eps2 = eps2
-    tree%print_time = .false.
+    tree = bhtree(theta = 1.0_prec, epsilon = eps)
 
     theta_increment = 0.2
     theta_end = 0d0
@@ -252,12 +240,7 @@ contains
 
     n = size(body_array)
 
-    tree%use_quad = .true.
-    tree%bh86 = .true.
-    tree%theta = 1.0d0
-    tree%quick_scan = .false.
-    tree%eps2 = eps2
-    tree%print_time = .false.
+    tree = bhtree(theta = 1.0_prec, epsilon = eps, use_quad = .true.)
 
     call array_force(body_array2)
 
