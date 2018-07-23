@@ -8,7 +8,7 @@ module bhtree_mod
   implicit none
 
   private
-  public :: bhtree
+  public :: bhtree, bh86_criterion, sw94_criterion
 
   integer, parameter :: max_depth = 32
  
