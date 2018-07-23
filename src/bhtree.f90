@@ -11,7 +11,6 @@ module bhtree_mod
   public :: bhtree
 
   integer, parameter :: max_depth = 32
-  logical, parameter :: use_test = .false.
  
   type :: bhtree
      real(prec) :: theta, eps2, rsize
