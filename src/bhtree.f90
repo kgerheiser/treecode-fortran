@@ -1,14 +1,14 @@
 
 module bhtree_mod
+  use, intrinsic :: iso_fortran_env, only: int64
   use constants_mod
   use node_mod, only: node, node_ptr
   use cell_mod, only: cell, cell_ptr
   use body_mod, only: body, body_ptr, is_same_body
-  use fconfig
   implicit none
 
   private
-  public :: bhtree, bh86_criterion, sw94_criterion
+  public :: bhtree, cell_opening_criteria, bh86_criterion, sw94_criterion
 
   integer, parameter :: max_depth = 32
  
@@ -20,6 +20,7 @@ module bhtree_mod
      type(cell), pointer :: root => null()
      class(node), pointer :: freecell => null()
    contains
+     procedure :: print_diagnostics
      procedure :: expand_box
      procedure :: make_cell
      procedure :: new_tree
@@ -45,6 +46,23 @@ module bhtree_mod
 contains
   
 
+  subroutine print_diagnostics(tree)
+    class(bhtree), intent(in) :: tree
+    print *, "quick_scan: ", tree%quick_scan
+    print *, "use_quad: ", tree%use_quad
+    print *, "tree depth: ", tree%tdepth
+    print *, "ncells: ", tree%ncells
+    print *, "nbbcalc: ", tree%nbbcalc
+    print *, "nbccalc: ", tree%nbccalc
+    !    print *, "actmax : ", actmax
+    !    print *, "actlen: ", tree%actlen
+    print *, "nbodies: ", tree%nbodies
+  end subroutine print_diagnostics
+
+  
+  !*****************************************************************************
+  ! Create new tree
+  !*****************************************************************************
   pure function new_bhtree(theta, epsilon, use_quad, quick_scan, opening_criterion) result(tree)
     type(bhtree) :: tree
     real(prec), intent(in) :: theta, epsilon
@@ -80,6 +98,7 @@ contains
 
   end function new_bhtree
 
+  
   !*****************************************************************************
   ! Initialize tree for hierarchical force calculation
   !*****************************************************************************
@@ -112,6 +131,7 @@ contains
     tree%subn_hist = 0
     tree%nbbcalc = 0
     tree%nbccalc = 0
+    tree%nbodies = size(body_array)
 
     call tree%eval_center_of_mass(tree%root, tree%rsize, 1)
     null_ptr => null()
@@ -135,6 +155,7 @@ contains
 
   end subroutine set_update
 
+  
   !*****************************************************************************
   ! Reclaim cells in tree, and prepare to build a new one
   !*****************************************************************************
@@ -504,7 +525,6 @@ contains
        allocate(interact(i)%ptr)
     end do
 
-
     call system_clock(cpustart)
     tree%actmax = 0
     tree%nbbcalc = 0
@@ -577,7 +597,7 @@ contains
           select type(p)
           type is(body)
              call sum_gravity(tree, p, interact, cptr, bptr)
-             class is(cell)
+          class is(cell)
              stop "recursion ended with a cell"
           end select
        end if

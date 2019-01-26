@@ -1,6 +1,5 @@
 module nbody_system_mod
-  use iso_fortran_env
-  use body_mod
+  use, intrinsic :: iso_fortran_env
   use fconfig
   implicit none
 
@@ -8,24 +7,23 @@ module nbody_system_mod
   public :: nbody_system
 
   type, abstract :: nbody_system
-     real(real64) :: dt, t_end, t_start, t
-     integer :: nbodies, random_seed, current_step, total_steps
-     type(body_ptr), allocatable :: body_array(:)
+     character(len=:), allocatable :: name
+     real(real64) :: dt, dt_diag, dt_checkpoint, t_end, t_start, t, t_diag, t_checkpoint
+     integer :: current_step, total_steps
      procedure(system_interface), pointer, private :: integrator
-     type(config) :: conf
-     logical :: verbose = .true.
+     logical :: verbose = .false.
    contains
      procedure(system_interface), deferred :: initialize
+     procedure, private :: initialize_private
      procedure(system_interface), deferred :: step
      procedure(system_interface), deferred :: finalize
-     procedure :: calculate_acceleration
-     procedure :: set_integrator
-     procedure :: integrate
-     procedure :: should_advance
+     procedure(system_interface), deferred :: checkpoint
+     procedure(system_interface), deferred :: write_diagnostics
+     !procedure(system_interface), deferred :: read_checkpoint
+     procedure, private :: should_step, should_checkpoint
+     procedure, private :: should_write_diagnostics
      procedure :: run
   end type nbody_system
-
-
 
   abstract interface
      subroutine system_interface(system)
@@ -37,89 +35,85 @@ module nbody_system_mod
 contains
 
 
-  subroutine set_integrator(system, integrator)
-    class(nbody_system), intent(inout) :: system
-    procedure(system_interface) :: integrator
-    system%integrator => integrator
-  end subroutine set_integrator
-
-
-  subroutine integrate(system)
-    class(nbody_system), intent(inout) :: system
-    call system%integrator()
-  end subroutine integrate
-
-
   subroutine run(system)
     class(nbody_system), intent(inout) :: system
+    integer(int64) :: t_start, t_end, count_rate
+    real(real64) :: elapsed_time
 
+    if (system%verbose) print *, "initializing"
     call system%initialize()
+    call system%initialize_private()
 
-    do while(system%should_advance())
-       if (system%verbose) print *, "Advancing system 1 step..."
+    if (system%verbose) print *, "starting"
+    do while(system%should_step())
+       if (system%verbose) print *, "advancing one step..."
        call system%step()
        system%current_step = system%current_step + 1
        system%t = system%t + system%dt
+
+       if (system%should_write_diagnostics()) then
+          if (system%verbose) print *, "writing diagnostics"
+          call system%write_diagnostics()
+          system%t_diag = system%t_diag + system%dt_diag
+       end if
+
+       if (system%should_checkpoint()) then
+          if (system%verbose) print *, "checkpointing"
+          call system%checkpoint()
+          system%t_checkpoint = system%t_checkpoint + system%dt_checkpoint
+       end if
+
+       !print '(a, f0.2)', "time: ", system%t
     end do
 
+    if (system%verbose) print *, "finalizing"
     call system%finalize()
 
   end subroutine run
   
 
-  pure logical function should_advance(system)
+  subroutine initialize_private(system)
+    class(nbody_system), intent(inout) :: system
+
+    system%t_end = (system%t_end + system%t_start) - (0.5d0 * system%dt)
+    system%t_diag = (system%dt_diag + system%t_start) - (0.5d0 * system%dt)
+    system%t_checkpoint = (system%dt_checkpoint + system%t_start) - (0.5d0 * system%dt)
+    
+  end subroutine initialize_private
+  
+  pure logical function should_step(system)
     class(nbody_system), intent(in) :: system
 
-    if (system%current_step < system%total_steps) then
-       should_advance = .true.
+    if (system%t <= system%t_end) then
+       should_step = .true.
     else
-       should_advance = .false.
+       should_step = .false.
     end if
-  end function should_advance
+  end function should_step
 
   
-  subroutine leap_frog_integrator(system)
-    class(nbody_system), intent(inout) :: system
-    class(body), pointer :: b
-    integer :: i, n
-    real(real64) :: dt
-
-    dt = system%dt
-    n = system%nbodies
-
-    do i = 1, n
-       b => system%body_array(i)%ptr
-       b%vel = b%vel + (b%acc * 0.5 * dt)
-       b%pos = b%pos + (b%vel * dt)
-    end do
-
-    call system%calculate_acceleration()
-
-    do i = 1, n
-       b => system%body_array(i)%ptr
-       b%vel = b%vel + (b%acc * 0.5 * dt)
-    end do
-
-  end subroutine leap_frog_integrator
+  subroutine checkpoint(system)
+    class(nbody_system), intent(in) :: system
+  end subroutine checkpoint
 
   
-  subroutine calculate_acceleration(system)
-    class(nbody_system), intent(inout) :: system
-    integer :: i, j, n
-    class(body), pointer :: b1, b2
+  pure logical function should_checkpoint(system)
+    class(nbody_system), intent(in) :: system
+    should_checkpoint = .false.
+    if (system%t >= system%t_checkpoint) then
+       should_checkpoint = .true.
+    end if    
+  end function should_checkpoint
 
-    n = size(system%body_array)
+  
+  pure logical function should_write_diagnostics(system)
+    class(nbody_system), intent(in) :: system
+    should_write_diagnostics = .false.
+    if (system%t >= system%t_diag) then
+       should_write_diagnostics = .true.
+    end if    
+  end function should_write_diagnostics
 
-    do i = 1, n
-       b1 => system%body_array(i)%ptr
-       do j = 1, n
-          if (i /= j) then
-             b2 => system%body_array(j)%ptr
-          end if
-       end do
-    end do
-
-  end subroutine calculate_acceleration
 
 end module nbody_system_mod
 
