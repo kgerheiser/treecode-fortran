@@ -2,9 +2,9 @@ module fconfig
   use iso_fortran_env, only: real64, real32, int64, int32, iostat_end
   implicit none
 
+  private
+  public :: config
   integer, parameter :: MAX_STR_LEN = 256
-  private :: value_from_key_str, value_from_key_r4, value_from_key_r8, &
-       value_from_key_i4, value_from_key_i8, value_from_key_logical
 
   type :: string
      character(:), allocatable :: str
@@ -153,9 +153,10 @@ contains
 
     str_val = conf%find_str_value_with_key(key)
 
-    if (.not. str_val == "") then
-       read(str_val, *, iostat=iostat) val
-       if (iostat /= 0) call string_conversion_error(str_val, "logical", key)      
+    if (str_val /= "") then
+       val = logical_from_str(str_val)
+       !read(str_val, *, iostat=iostat) val
+       !if (iostat /= 0) call string_conversion_error(str_val, "logical", key)      
     else
        if (present(default_value)) then
           val = default_value
@@ -163,6 +164,37 @@ contains
           call value_not_found_error(key)
        end if
     end if
+
+  contains
+
+    logical function logical_from_str(str) result(val)
+      character(*), intent(in) :: str
+      select case(trim(str))
+      case("true")
+         val = .true.
+      case("yes")
+         val = .true.
+      case("y")
+         val = .true.
+      case("t")
+         val = .true.
+      case("false")
+         val = .false.
+      case("f")
+         val = .false.
+      case("no")
+         val = .false.
+      case("n")
+         val = .false.
+      case("1")
+         val = .true.
+      case("0")
+         val = .false.
+      case default
+         print *, "error converting string to logical: ", str
+         stop
+      end select
+    end function logical_from_str
 
   end subroutine value_from_key_logical
 
@@ -178,7 +210,7 @@ contains
     stop
   end subroutine string_conversion_error
 
-  integer function find_key_index(conf, key) result(index)
+  pure integer function find_key_index(conf, key) result(index)
     class(config), intent(in) :: conf
     character(*), intent(in) :: key
     integer :: i, n
@@ -192,7 +224,7 @@ contains
 
   end function find_key_index
 
-  function find_str_value_with_key(conf, key) result(str_val)
+  pure function find_str_value_with_key(conf, key) result(str_val)
     class(config), intent(in) :: conf
     character(*), intent(in) :: key
 
@@ -201,7 +233,7 @@ contains
 
     n = conf%num_entries
 
-    key_index = conf%find_key_index(adjustl(trim(key)))
+    key_index = conf%find_key_index(strip(key))
     str_val = ""
 
     if (key_index /= 0) then
@@ -249,21 +281,13 @@ contains
        sub_index = index(line, ":")
 
        if (sub_index == 0) then
-          print *, "Line missing ':', ", adjustl(trim(line))
+          print *, "Line missing colon ':', ", adjustl(trim(line))
           print *, "canceling parse..."
           stop
        else
-          conf%keys(i)%str = line(1:sub_index-1)
-          conf%values(i)%str = line(sub_index+1:)
+          conf%keys(i)%str = strip(line(1:sub_index-1))
+          conf%values(i)%str = strip(line(sub_index+1:))
        end if
-    end do
-
-    do i = 1, size(conf%keys)
-       conf%keys(i)%str = adjustl(conf%keys(i)%str)
-       conf%keys(i)%str = trim(conf%keys(i)%str)
-       
-       conf%values(i)%str = adjustl(conf%values(i)%str)
-       conf%values(i)%str = trim(conf%values(i)%str)
     end do
 
   contains
@@ -285,6 +309,28 @@ contains
     end function accept_line
 
   end subroutine read_file
+
+  pure function strip(text) result(stripped)
+    character(*), intent(in) :: text
+    character(len=:), allocatable :: stripped
+    stripped = to_lower_case(trim(adjustl(text)))
+  end function strip
+
+  pure function to_lower_case(str) result(lower_case)
+    character(*), intent(in) :: str
+    character(len=:), allocatable :: lower_case
+    integer i, char_int
+
+    lower_case = trim(str)
+
+    do i = 1, len(str)
+       char_int = ichar(lower_case(i:i))
+       if (char_int > 64 .and. char_int < 91) then
+          lower_case(i:i) = char(char_int + 32)
+       end if
+    end do
+
+  end function to_lower_case
 
 end module fconfig
 
