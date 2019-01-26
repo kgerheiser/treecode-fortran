@@ -1,0 +1,10 @@
+dt: 0.1
+t_start: 0.0
+t_end: 1.0
+random_seed: 0
+use_quad: y
+quick_scan: false
+theta: 1.0
+body_input_file: plummer-500.in
+dt_checkpoint: 0.1
+dt_diag: 999999
